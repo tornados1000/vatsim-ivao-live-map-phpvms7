@@ -2,7 +2,7 @@
 
 // Featuretests fuer LiveMap/Http/Controllers/LiveFlightsController.php —
 // durch den echten Router des lokalen phpVMS (~/Claude/phpvms-7), mit
-// Http::fake() statt echtem live.kant.ovh:
+// Http::fake() statt echtem live.nexusairva.org:
 //
 //     php tests/live_flights_probe.php
 //
@@ -128,7 +128,7 @@ function zurueck(): void
     global $einstellungen, $pireps, $pirepsKaputt;
     $einstellungen = [
         'acars.livemap_quelle'   => 'aeroacars',
-        'acars.livemap_live_url' => 'https://live.kant.ovh',
+        'acars.livemap_live_url' => 'https://live.nexusairva.org',
         'acars.livemap_live_key' => SCHLUESSEL,
         'acars.live_time'        => 0,
     ];
@@ -252,7 +252,7 @@ pruefe('phpVMS-Abfrage scheitert: 503, ok=false, fehler=phpvms', $code === 503 &
 // 2. Quelle AeroACARS Live, gueltiger Schluessel
 // ═════════════════════════════════════════════════════════════════════════
 zurueck();
-live(['live.kant.ovh/api/flights' => Http::response(liveListe(), 200)]);
+live(['live.nexusairva.org/api/flights' => Http::response(liveListe(), 200)]);
 [$code, $j, , $cc] = hole('/livemap/api/fluege');
 $f = $j['fluege'][0] ?? [];
 pruefe('Live: 200, ok, Quelle aeroacars', $code === 200 && ($j['ok'] ?? null) === true && ($j['quelle'] ?? '') === 'aeroacars', [$code, $j]);
@@ -260,7 +260,7 @@ pruefe('Live: normalisiert — gueltiger Flug bleibt, "../boese" faellt weg', co
 pruefe('Live: Flugzeug aus der Position, Flughafen, Name, Phase', ($f['aircraft_icao'] ?? '') === 'B789' && ($f['dep'] ?? '') === 'PANC' && ($f['pilot_name'] ?? '') === 'Kenji M.' && ($f['phase'] ?? '') === 'CLIMB', $f);
 pruefe('Live: Position mit Hoehe/Mach/AP', ($f['pos']['alt_ft'] ?? 0) === 39000 && ($f['pos']['mach'] ?? 0) === 0.85 && ($f['pos']['ap_master'] ?? null) === true, $f['pos'] ?? null);
 $an = gesendet();
-pruefe('Live: genau ein Abruf, GET https://live.kant.ovh/api/flights', count($an) === 1 && $an[0]->method() === 'GET' && $an[0]->url() === 'https://live.kant.ovh/api/flights', adressen());
+pruefe('Live: genau ein Abruf, GET https://live.nexusairva.org/api/flights', count($an) === 1 && $an[0]->method() === 'GET' && $an[0]->url() === 'https://live.nexusairva.org/api/flights', adressen());
 pruefe('Live: Authorization Bearer <Schluessel>', ($an[0]->header('Authorization')[0] ?? '') === 'Bearer '.SCHLUESSEL, $an[0]->header('Authorization'));
 pruefe('Live: Kopfzeile User-Agent GSG-LiveMap/5, Accept JSON', ($an[0]->header('User-Agent')[0] ?? '') === 'GSG-LiveMap/5' && str_contains($an[0]->header('Accept')[0] ?? '', 'application/json'));
 pruefe('Antwort an den Browser: Cache-Control no-store', is_string($cc) && str_contains($cc, 'no-store'), $cc);
@@ -268,14 +268,14 @@ pruefe('Antwort an den Browser: Cache-Control no-store', is_string($cc) && str_c
 // Spur + Route (gleicher Schluessel, eigene Pfade)
 zurueck();
 live([
-    'live.kant.ovh/api/flights/GSG/1003/positions' => Http::response([['lat' => 61.0, 'lon' => 179.5], ['lat' => 61.0, 'lon' => -179.5]], 200),
-    'live.kant.ovh/api/flights/GSG/1003/route'     => Http::response(['waypoints' => [['name' => 'NIPPI', 'lat' => 50, 'lon' => 179.9]]], 200),
+    'live.nexusairva.org/api/flights/GSG/1003/positions' => Http::response([['lat' => 61.0, 'lon' => 179.5], ['lat' => 61.0, 'lon' => -179.5]], 200),
+    'live.nexusairva.org/api/flights/GSG/1003/route'     => Http::response(['waypoints' => [['name' => 'NIPPI', 'lat' => 50, 'lon' => 179.9]]], 200),
 ]);
 [$code, $j] = hole('/livemap/api/fluege/GSG/1003/spur');
 pruefe('Spur: 200, zwei Punkte', $code === 200 && ($j['punkte'] ?? null) == [[61.0, 179.5], [61.0, -179.5]], [$code, $j]);
 [$code, $j] = hole('/livemap/api/fluege/GSG/1003/route');
 pruefe('Route: 200, Wegpunkt NIPPI', $code === 200 && ($j['punkte'] ?? null) == [[50.0, 179.9, 'NIPPI']], [$code, $j]);
-pruefe('Spur/Route gehen nur an die zwei freigegebenen Pfade', adressen() === ['https://live.kant.ovh/api/flights/GSG/1003/positions', 'https://live.kant.ovh/api/flights/GSG/1003/route'], adressen());
+pruefe('Spur/Route gehen nur an die zwei freigegebenen Pfade', adressen() === ['https://live.nexusairva.org/api/flights/GSG/1003/positions', 'https://live.nexusairva.org/api/flights/GSG/1003/route'], adressen());
 pruefe('Spur/Route tragen den Schluessel', gesendet()[0]->header('Authorization')[0] === 'Bearer '.SCHLUESSEL && gesendet()[1]->header('Authorization')[0] === 'Bearer '.SCHLUESSEL);
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -283,7 +283,7 @@ pruefe('Spur/Route tragen den Schluessel', gesendet()[0]->header('Authorization'
 // ═════════════════════════════════════════════════════════════════════════
 foreach ([401, 403] as $st) {
     zurueck();
-    live(['live.kant.ovh/*' => Http::response(['error' => 'unauthorized', 'echo' => SCHLUESSEL], $st)]);
+    live(['live.nexusairva.org/*' => Http::response(['error' => 'unauthorized', 'echo' => SCHLUESSEL], $st)]);
     [$code, $j, $roh] = hole('/livemap/api/fluege');
     pruefe("Live $st: 503, ok=false, fehler=abgelehnt, keine Fluege", $code === 503 && ($j['ok'] ?? null) === false && ($j['fehler'] ?? '') === 'abgelehnt' && ($j['fluege'] ?? null) === [], [$code, $j]);
     pruefe("Live $st: Antworttext von live wird nicht durchgereicht", !str_contains($roh, 'unauthorized'), $roh);
@@ -313,23 +313,23 @@ hole('/livemap/api/fluege/GSG/1003/route');
 pruefe('Kein Schluessel: auch Spur und Route fragen live nicht', anzahlAnLive() === 0);
 
 // ═════════════════════════════════════════════════════════════════════════
-// 5. Host ≠ live.kant.ovh wird nie angefragt
+// 5. Host ≠ live.nexusairva.org wird nie angefragt
 // ═════════════════════════════════════════════════════════════════════════
 $fremde = [
-    'http://live.kant.ovh'               => 'falsches Schema (http)',
-    'https://live.kant.ovh.evil.example' => 'Host nur als Anfang',
+    'http://live.nexusairva.org'               => 'falsches Schema (http)',
+    'https://live.nexusairva.org.evil.example' => 'Host nur als Anfang',
     'https://evil.example'               => 'fremder Host',
-    'https://user:pw@live.kant.ovh'      => 'Zugangsdaten in der Adresse',
-    'https://live.kant.ovh@evil.example' => 'Host nach dem @',
-    'https://live.kant.ovh/pfad'         => 'Pfad',
-    'https://live.kant.ovh?x=1'          => 'Abfrage',
-    'https://live.kant.ovh#x'            => 'Fragment',
-    'https://live.kant.ovh:8443'         => 'anderer Port',
+    'https://user:pw@live.nexusairva.org'      => 'Zugangsdaten in der Adresse',
+    'https://live.nexusairva.org@evil.example' => 'Host nach dem @',
+    'https://live.nexusairva.org/pfad'         => 'Pfad',
+    'https://live.nexusairva.org?x=1'          => 'Abfrage',
+    'https://live.nexusairva.org#x'            => 'Fragment',
+    'https://live.nexusairva.org:8443'         => 'anderer Port',
     'https://169.254.169.254'            => 'Metadaten-Adresse',
     'https://localhost'                  => 'localhost per https',
     'http://127.0.0.1:8080'              => 'lokal, aber Produktion',
-    'ftp://live.kant.ovh'                => 'anderes Schema',
-    '//live.kant.ovh'                    => 'ohne Schema',
+    'ftp://live.nexusairva.org'                => 'anderes Schema',
+    '//live.nexusairva.org'                    => 'ohne Schema',
 ];
 foreach ($fremde as $adresse => $grund) {
     zurueck();
@@ -350,19 +350,19 @@ pruefe('Fremde Adresse: auch Spur und Route fragen niemanden', anzahlAnLive() ==
 
 // Gegenprobe: die erlaubten Formen werden gefragt
 zurueck();
-foreach (['https://live.kant.ovh', 'https://live.kant.ovh/', 'HTTPS://LIVE.KANT.OVH', 'https://live.kant.ovh:443', '  https://live.kant.ovh  '] as $adresse) {
+foreach (['https://live.nexusairva.org', 'https://live.nexusairva.org/', 'HTTPS://LIVE.NEXUSAIRVA.ORG', 'https://live.nexusairva.org:443', '  https://live.nexusairva.org  '] as $adresse) {
     Cache::flush();
     live(['*' => Http::response(liveListe(), 200)]);
     $einstellungen['acars.livemap_live_url'] = $adresse;
     [$code] = hole('/livemap/api/fluege');
     $u = gesendet()[0] ?? null;
-    pruefe("Adresse '".trim($adresse)."' ist erlaubt und geht an https://live.kant.ovh/api/flights", $code === 200 && $u !== null && $u->url() === 'https://live.kant.ovh/api/flights', [$code, $u ? $u->url() : null]);
+    pruefe("Adresse '".trim($adresse)."' ist erlaubt und geht an https://live.nexusairva.org/api/flights", $code === 200 && $u !== null && $u->url() === 'https://live.nexusairva.org/api/flights', [$code, $u ? $u->url() : null]);
 }
 zurueck();
 $einstellungen['acars.livemap_live_url'] = '';
 live(['*' => Http::response(liveListe(), 200)]);
 hole('/livemap/api/fluege');
-pruefe('Leere Adresse → Standard live.kant.ovh', adressen() === ['https://live.kant.ovh/api/flights'], adressen());
+pruefe('Leere Adresse → Standard live.nexusairva.org', adressen() === ['https://live.nexusairva.org/api/flights'], adressen());
 // Pruefserver nur ausserhalb der Produktion
 zurueck();
 $einstellungen['acars.livemap_live_url'] = 'http://127.0.0.1:9';
@@ -372,9 +372,9 @@ pruefe('Pruefserver http://127.0.0.1:9 ausserhalb der Produktion erlaubt', $code
 
 // Weiterleitung: nicht folgen (der Schluessel ginge sonst mit), kein zweiter Abruf
 zurueck();
-live(['live.kant.ovh/*' => Http::response('', 302, ['Location' => 'https://evil.example/api/flights']), '*' => Http::response(liveListe(), 200)]);
+live(['live.nexusairva.org/*' => Http::response('', 302, ['Location' => 'https://evil.example/api/flights']), '*' => Http::response(liveListe(), 200)]);
 [$code, $j] = hole('/livemap/api/fluege');
-pruefe('Weiterleitung: nicht_erreichbar, nur der eine Abruf an live', $code === 503 && ($j['fehler'] ?? '') === 'nicht_erreichbar' && adressen() === ['https://live.kant.ovh/api/flights'], [$code, $j['fehler'] ?? null, adressen()]);
+pruefe('Weiterleitung: nicht_erreichbar, nur der eine Abruf an live', $code === 503 && ($j['fehler'] ?? '') === 'nicht_erreichbar' && adressen() === ['https://live.nexusairva.org/api/flights'], [$code, $j['fehler'] ?? null, adressen()]);
 
 // ═════════════════════════════════════════════════════════════════════════
 // 6. Pfad-Ausbruch
@@ -411,7 +411,7 @@ pruefe('Controller: bei verbotener Kennung kein Abruf', anzahlAnLive() === 0, an
 zurueck();
 live(['*' => Http::response([], 200)]);
 $c->spur('V-A.1', 'p_2');
-pruefe('Gueltige Kennung V-A.1/p_2 geht unveraendert in den Pfad', adressen() === ['https://live.kant.ovh/api/flights/V-A.1/p_2/positions'], adressen());
+pruefe('Gueltige Kennung V-A.1/p_2 geht unveraendert in den Pfad', adressen() === ['https://live.nexusairva.org/api/flights/V-A.1/p_2/positions'], adressen());
 
 // ═════════════════════════════════════════════════════════════════════════
 // 7. Zwischenspeicher 8 s haengt an Adresse + Schluessel
@@ -453,7 +453,7 @@ $einstellungen['acars.livemap_live_url'] = 'http://127.0.0.1:9';
 hole('/livemap/api/fluege');
 $einstellungen['acars.livemap_live_url'] = 'http://localhost:9';
 hole('/livemap/api/fluege');
-pruefe('Puffer: Adresswechsel → jedes Mal ein eigener Abruf', adressen() === ['https://live.kant.ovh/api/flights', 'http://127.0.0.1:9/api/flights', 'http://localhost:9/api/flights'], adressen());
+pruefe('Puffer: Adresswechsel → jedes Mal ein eigener Abruf', adressen() === ['https://live.nexusairva.org/api/flights', 'http://127.0.0.1:9/api/flights', 'http://localhost:9/api/flights'], adressen());
 
 // Fehler werden kurz gepuffert (8 s), nicht pro Besuch neu gerufen
 zurueck();
@@ -553,7 +553,7 @@ $leer = new class() extends ArrayObject {
 try {
     app('view')->addNamespace('livemap', [$stub, $modulOrdner.'/Resources/views']);
     $html = view('livemap::admin.index', [
-        'settings' => ['acars.livemap_live_key' => SCHLUESSEL, 'acars.livemap_quelle' => 'aeroacars', 'acars.livemap_live_url' => 'https://live.kant.ovh'],
+        'settings' => ['acars.livemap_live_key' => SCHLUESSEL, 'acars.livemap_quelle' => 'aeroacars', 'acars.livemap_live_url' => 'https://live.nexusairva.org'],
         'layerOptions' => [], 'basemapOptions' => [], 'weatherProxyStatus' => $leer, 'cartoStatus' => $leer, 'acarsLiveTimeStatus' => $leer, 'errors' => new Illuminate\Support\ViewErrorBag(),
     ])->render();
 } catch (Throwable $e) {

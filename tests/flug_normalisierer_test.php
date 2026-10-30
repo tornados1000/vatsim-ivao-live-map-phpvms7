@@ -106,12 +106,12 @@ pruefe('phpVMS-Flug in derselben Form', $p['id'] === 'phpvms/abc123' && $p['phas
 $voll = N::ausPhpvms(['pirep_id' => 'abc124', 'callsign' => 'GSG101', 'status' => 'ENR', 'lat' => 50, 'lon' => 8, 'pilot_name' => 'Paul Peter Neumann']);
 pruefe('phpVMS ohne name_private: voller Name wird gekürzt', $voll['pilot_name'] === 'Paul N.', $voll['pilot_name']);
 
-// Adresse von AeroACARS Live: der Schluessel darf nur an live.kant.ovh gehen (SSRF)
-pruefe('Standardadresse', N::liveBasis('', false) === 'https://live.kant.ovh');
-pruefe('live.kant.ovh mit Schraegstrich', N::liveBasis('https://live.kant.ovh/', false) === 'https://live.kant.ovh');
-$verboten = ['https://evil.example', 'https://live.kant.ovh.evil.example', 'https://evil.example/live.kant.ovh',
-    'http://live.kant.ovh', 'https://live.kant.ovh/api', 'https://user@live.kant.ovh', 'https://live.kant.ovh?x=1',
-    'https://live.kant.ovh:8443', 'https://10.0.0.5', 'http://169.254.169.254', 'http://127.0.0.1:8792', 'javascript:alert(1)'];
+// Adresse von AeroACARS Live: der Schluessel darf nur an live.nexusairva.org gehen (SSRF)
+pruefe('Standardadresse', N::liveBasis('', false) === 'https://live.nexusairva.org');
+pruefe('live.nexusairva.org mit Schraegstrich', N::liveBasis('https://live.nexusairva.org/', false) === 'https://live.nexusairva.org');
+$verboten = ['https://evil.example', 'https://live.nexusairva.org.evil.example', 'https://evil.example/live.nexusairva.org',
+    'http://live.nexusairva.org', 'https://live.nexusairva.org/api', 'https://user@live.nexusairva.org', 'https://live.nexusairva.org?x=1',
+    'https://live.nexusairva.org:8443', 'https://10.0.0.5', 'http://169.254.169.254', 'http://127.0.0.1:8792', 'javascript:alert(1)'];
 $alleAb = true;
 foreach ($verboten as $u) {
     if (N::liveBasis($u, false) !== null) {

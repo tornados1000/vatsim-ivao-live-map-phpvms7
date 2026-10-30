@@ -15,8 +15,8 @@ New in v5.0.0:
 
   - phpVMS (default): the running PIREPs of this site, as before.
   - AeroACARS Live: the same flights, fields and phases as the admin
-    web app on live.kant.ovh. Needs a read key; the key stays on the
-    server and is only ever sent to https://live.kant.ovh.
+    web app on live.nexusairva.org. Needs a read key; the key stays on the
+    server and is only ever sent to https://live.nexusairva.org.
 
   Without a stored source the map uses phpVMS - nothing to do after the
   upgrade. Only a fixed field list leaves the server, pilot names are

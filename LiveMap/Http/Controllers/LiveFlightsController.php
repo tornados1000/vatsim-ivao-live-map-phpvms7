@@ -43,7 +43,7 @@ use Modules\LiveMap\Support\FlugNormalisierer;
  */
 class LiveFlightsController extends Controller
 {
-    public const STANDARD_BASIS = 'https://live.kant.ovh';
+    public const STANDARD_BASIS = 'https://live.nexusairva.org';
 
     private const PUFFER_LISTE_S = 8;
     private const PUFFER_SPUR_S = 15;

@@ -7,7 +7,7 @@ namespace Modules\LiveMap\Support;
  *
  * # Warum hier und nicht im Browser
  *
- * Die Quelle "AeroACARS Live" (live.kant.ovh) braucht einen Schluessel. Der
+ * Die Quelle "AeroACARS Live" (live.nexusairva.org) braucht einen Schluessel. Der
  * darf nie im Browser landen, also laeuft jeder Abruf ueber das Modul. Wenn
  * das Modul ohnehin dazwischen sitzt, legt es auch fest, WELCHE Felder die
  * oeffentliche Seite ueberhaupt sieht: nur die, die die Admin-Webapp auf
@@ -84,12 +84,12 @@ final class FlugNormalisierer
     }
 
     /** Der einzige Host, an den der Lese-Schluessel gehen darf. */
-    public const LIVE_HOST = 'live.kant.ovh';
+    public const LIVE_HOST = 'live.nexusairva.org';
 
     /**
      * Pruefung der eingestellten Adresse von AeroACARS Live.
      *
-     * Erlaubt ist nur https://live.kant.ovh (ohne Pfad, Nutzer, Abfrage).
+     * Erlaubt ist nur https://live.nexusairva.org (ohne Pfad, Nutzer, Abfrage).
      * Ausserhalb der Produktion zusaetzlich http://127.0.0.1 bzw. localhost
      * mit Port fuer einen Pruefserver. Alles andere → null: Der Schluessel
      * ginge sonst an eine beliebige — auch interne — Adresse (SSRF).
