@@ -83,7 +83,7 @@
                     };
 
                     // Sprache der Bedienelemente: Deutsch, wenn die Seite deutsch ist.
-                    $lmDe = str_starts_with(strtolower((string) app()->getLocale()), 'de');
+                    $lmDe = false; // always English (fork setting) — upstream: str_starts_with(strtolower((string) app()->getLocale()), 'de')
 
                     $oldStyle = $lmBool($lmSetting('acars.livemap_old_style', false), false);
                     $showTopFlights = $oldStyle
@@ -172,7 +172,7 @@
                         'quelle'                  => class_exists(\Modules\LiveMap\Http\Controllers\LiveFlightsController::class)
                             ? \Modules\LiveMap\Http\Controllers\LiveFlightsController::quelle() : 'phpvms',
                         'refreshMs'               => 10000,
-                        'sprache'                 => $lmDe ? 'de' : 'en',
+                        'sprache'                 => 'en',
                         'center'                  => [(float) ($center[0] ?? 50), (float) ($center[1] ?? 10)],
                         'zoom'                    => (int) ($zoom ?? 5),
                     ];
