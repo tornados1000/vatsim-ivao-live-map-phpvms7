@@ -443,6 +443,13 @@
           <a href="https://www.paypal.com/donate/?hosted_button_id=7QEUD3PZLZPV2" target="_blank" rel="noopener noreferrer">Support via PayPal</a>
         </p>
         --}}
+        <style>
+          .lm-footer { margin-top:14px; font-size:12px; color:#666; letter-spacing:.02em; }
+          .lm-heart { color:#e25555; display:inline-block; animation:lm-pulse 1.8s ease-in-out infinite; }
+          @keyframes lm-pulse { 0%,100% { transform:scale(1); } 50% { transform:scale(1.15); } }
+          @media (prefers-reduced-motion: reduce) { .lm-heart { animation:none; } }
+        </style>
+        <p class="lm-footer">Crafted with <span class="lm-heart">&hearts;</span> by Charalampos Rig.</p>
       </form>
 
     </div>
