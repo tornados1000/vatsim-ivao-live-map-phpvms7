@@ -437,10 +437,12 @@
 
         <hr>
         <button type="submit" class="btn btn-primary">Save Settings</button>
+        {{-- footer hidden (fork):
         <p style="margin-top:14px; font-size:12px; color:#666;">
           Crafted with &hearts; in Germany by Thomas Kant -
           <a href="https://www.paypal.com/donate/?hosted_button_id=7QEUD3PZLZPV2" target="_blank" rel="noopener noreferrer">Support via PayPal</a>
         </p>
+        --}}
       </form>
 
     </div>
