@@ -4,6 +4,83 @@ All notable changes to this project are documented in this file.
 
 ---
 
+## [5.0.0] — 2026-10-30
+
+AeroACARS 3.0, Pflichtenheft P-11.11 (A-75, N-12, F-020).
+
+### Changed / Geändert
+- **Datenquelle der Flüge ist eine Einstellung.** *phpVMS* (Standard, laufende
+  PIREPs dieser Seite) oder *AeroACARS Live* (dieselben Flüge, Felder und
+  Phasen wie die Admin-Webapp auf live.kant.ovh). Abgerufen wird immer über
+  das Modul (`/livemap/api/fluege`, Puffer 8 s); der Lese-Schlüssel für
+  AeroACARS Live bleibt auf dem Server. Nur eine feste Feldliste verlässt den
+  Server, Pilotennamen gekürzt („Kenji M.").
+  *Flight data source is now a setting (phpVMS or AeroACARS Live), always
+  fetched server-side; the read key never reaches the browser.*
+- **Eigene Karte statt `render_live_map` des phpVMS-Kerns.** Keine doppelten
+  VA-Flieger, keine zweite Grundebene ohne CARTO-Schlüssel mehr.
+  *Own Leaflet map instead of the core helper.*
+- **Neue Gestaltung nach den GSG-Markenregeln** (Navy/Rot/Gold, hell und
+  dunkel nach SPTheme): Flugliste links mit den Feldern der Flugtafel,
+  Flugdetail rechts mit den Feldern des Webapp-Flugdetails, Werkzeuge oben
+  rechts (Netzwerk, Wetter, Karte, Folgen). Unter 760 px Widget-Breite
+  Liste und Detail als Blatt von unten.
+  *Redesign following the GSG brand rules, responsive by widget width.*
+- Die Farben „Mobile Flights Button" (aktiv/inaktiv) wirken nicht mehr: die
+  Werkzeugleiste nutzt Primär-/Akzentfarbe. Die Höhe aus dem Widget-Aufruf
+  wird nicht mehr benutzt (Karte füllt das Fenster).
+  *Mobile button colours and the widget height argument are no longer used.*
+- Phasen, Farben, Namen, Reihenfolge und „Level"-Anzeige wie die Webapp
+  (Test vergleicht mit einer Abschrift von `phaseColors.ts`).
+
+### Security / Sicherheit
+- Der Lese-Schlüssel geht nur an `https://live.kant.ovh` (außerhalb der
+  Produktion zusätzlich an einen Prüfserver auf 127.0.0.1/localhost); keine
+  Weiterleitungen, Puffer an Adresse und Schlüssel gebunden.
+  *The read key is only ever sent to live.kant.ovh; no redirects.*
+
+### Fixed / Behoben
+- Kurze Störungen der Quelle lassen den letzten guten Stand stehen
+  (als veraltet markiert, mit „Erneut versuchen"); falscher Schlüssel leert.
+- Kartenhöhe folgt dem Fenster (440–1400 px) statt fest 800 px.
+- Unter Zoom 3 verschwand die ganze Marker-Ebene (Flughafen-Lotsen-Logik
+  blendete das Elternelement aus — das war die Ebene selbst).
+  *Below zoom 3 the whole marker pane was hidden.*
+- Spur und Marker eines Flugs über 180° liegen immer in der Weltkopie, in der
+  die Karte gerade steht.
+
+---
+
+## [4.7.9] — 2026-09-25
+
+### Fixed
+- **VATSIM-/IVAO-Sektoren an der Datumsgrenze waren zerschnitten.** Die
+  VATSpy-Grenzen teilen Pazifik-FIRs (Anchorage, Oakland Oceanic, Magadan,
+  Nadi, Auckland …) bei genau ±180° in zwei Stücke. Leaflet zeigte davon
+  zwei Fehler: Der Rand zog an 180° eine senkrechte Naht mitten durch den
+  Sektor, und beim Verschieben der Karte über die Datumsgrenze fehlte die
+  andere Hälfte — Leaflet zeichnet Flächen nur in *einer* Weltkopie.
+  Sektoren, die ±180° berühren, werden jetzt als Fläche ohne Rand plus
+  eigenem Umriss ohne Schnittkante gezeichnet, zusätzlich um ±360°
+  verschoben, samt Beschriftung. Alle anderen Sektoren werden unverändert
+  gezeichnet.
+
+---
+
+## [4.7.8] — 2026-09-25
+
+### Fixed
+- **Die rote Ziel-Linie lief an der Datumsgrenze quer über die ganze Karte.**
+  Ein Flug über den Pazifik (z. B. über die Aleuten, 179° O → 179° W) bekam
+  statt einer kurzen Linie zum Ziel eine Gerade einmal um die Welt. Leaflet
+  verbindet zwei Punkte auf dem kurzen Weg in *Längengraden* — von 179° O nach
+  179° W sind das 358°. Das Ziel wird jetzt um volle 360° neben das Flugzeug
+  gelegt (181° statt −179°); Leaflet zeichnet Längen außerhalb ±180 in der
+  Nachbarkopie der Welt weiter. Die geflogene Spur des Kerns (`L.Geodesic`)
+  war nicht betroffen.
+
+---
+
 ## [4.7.7] — 2026-09-01
 
 ### Fixed
