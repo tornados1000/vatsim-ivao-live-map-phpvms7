@@ -1,115 +1,17 @@
-@section('scripts')
-    @parent
-    <!-- lm3:skripte-anfang -->
+<!-- lm3:skripte-anfang -->
+{{-- 5.1: Die Karte leiht sich nichts mehr vom Theme. Eigenes Leaflet 1.9.4
+     (gepinnt, mit Pruefsumme), sofort mit noConflict() beiseitegelegt: Das
+     Theme darf danach sein eigenes `window.L` laden (SPTheme/Seven bringen
+     1.8 in vendor.js mit) — die Karte benutzt nur `window.LM_L`.
+     Die Skripte stehen bewusst direkt im Widget und nicht in
+     dem Skript-Abschnitt des Layouts: ob ein Theme diesen Abschnitt ausgibt, haengt vom
+     Theme ab. --}}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
+<script>
+    window.LM_L = (window.L && typeof window.L.noConflict === 'function' && window.L.version === '1.9.4') ? window.L.noConflict() : null;
+</script>
 
-    <script>
-        // Defensive: force any L.TileLayer URL — including ones created by other
-        // scripts on the page (legacy live_map.js, themes, core phpVMS map) — to
-        // HTTPS. Without this, mixed-content warnings pile up into the hundreds
-        // whenever another module ships an older Leaflet tile layer with http://.
-        (function lmUpgradeTileUrlsToHttps() {
-            if (!window.L || !L.TileLayer || L.TileLayer.prototype._lmHttpsUpgradePatched) return;
-            var origInit = L.TileLayer.prototype.initialize;
-            L.TileLayer.prototype.initialize = function (url, options) {
-                if (typeof url === 'string' && url.indexOf('http://') === 0) {
-                    url = 'https://' + url.substring(7);
-                }
-                return origInit.call(this, url, options);
-            };
-            var origSetUrl = L.TileLayer.prototype.setUrl;
-            L.TileLayer.prototype.setUrl = function (url, noRedraw) {
-                if (typeof url === 'string' && url.indexOf('http://') === 0) {
-                    url = 'https://' + url.substring(7);
-                }
-                return origSetUrl.call(this, url, noRedraw);
-            };
-            L.TileLayer.prototype._lmHttpsUpgradePatched = true;
-        })();
-
-        {{-- Den CARTO-Schluessel an JEDE Kachel haengen, auch an die, die
-             dieses Modul gar nicht baut.
-
-             # Der Befund (ProAvia, 27.08.2026)
-
-             „I still see the api key required message on page load. If I
-             open the map type box, select another map style and then
-             select Carto Light it loads fine."
-
-             Genau das Muster: Die Ebenen, die DIESES Modul erzeugt, tragen
-             den Schluessel (siehe `mitCartoKey` weiter unten) — deshalb ist
-             die Karte nach dem Umschalten sauber. Beim Laden liegt aber eine
-             ANDERE Ebene oben. Sie stammt aus dem phpVMS-Kern: Die Seite
-             reicht `providers: {'CartoDB.Positron': {}}` an
-             `render_live_map` durch, und der Kern baut daraus selbst eine
-             Kachelebene:
-
-                 for (r in i.providers)
-                     n.tileLayer.provider(r, i.providers[r]).addTo(o)
-
-             Deren Adresse kommt aus dem Katalog von `leaflet-providers`, und
-             der hat fuer CartoDB **keinen Platz fuer einen Schluessel**. An
-             dieser Ebene kommt kein Modul-Code vorbei.
-
-             # Warum hier
-
-             Dieselbe Ueberlegung wie beim HTTPS-Aufzug direkt darueber: die
-             eine Stelle abfangen, durch die jede Kachel geht. Damit ist
-             gleichgueltig, wer die Ebene baut — Kern, Theme, dieses Modul
-             oder eine, die spaeter dazukommt.
-
-             `getTileUrl` und nicht `initialize`: Manche Ebenen bekommen ihre
-             Adresse erst spaeter (`setUrl`), und der Katalog setzt sie aus
-             Bausteinen zusammen. Beim Abruf steht sie fest.
-
-             ⚠ Das laeuft VOR `DOMContentLoaded`. Ein Skript weiter unten
-             kaeme zu spaet: Die ersten Kacheln waeren schon angefordert und
-             trugen das Wasserzeichen, bis der Nutzer schwenkt. --}}
-        @php
-            // Bewusst hier selbst gelesen statt aus $liveMapUiConfig: Diese
-            // Datei soll nicht davon abhaengen, dass das andere Widget
-            // vorher gerendert wurde.
-            $lmCartoKeyFuerPatch = trim((string) (setting('acars.carto_api_key', env('CARTO_API_KEY', '')) ?? ''));
-        @endphp
-        @if($lmCartoKeyFuerPatch !== '')
-        (function lmCartoKeyAnJedeKachel() {
-            var SCHLUESSEL = @json($lmCartoKeyFuerPatch);
-
-            function patch(L) {
-                if (!L || !L.TileLayer || !L.TileLayer.prototype) return false;
-                if (L.TileLayer.prototype._lmCartoKeyPatched) return true;
-                var alt = L.TileLayer.prototype.getTileUrl;
-                if (typeof alt !== 'function') return false;
-                L.TileLayer.prototype.getTileUrl = function (coords) {
-                    var url = alt.call(this, coords);
-                    if (typeof url === 'string' && url.indexOf('cartocdn.com') !== -1 && !/[?&]key=/.test(url)) {
-                        url += (url.indexOf('?') === -1 ? '?' : '&') + 'key=' + encodeURIComponent(SCHLUESSEL);
-                    }
-                    return url;
-                };
-                L.TileLayer.prototype._lmCartoKeyPatched = true;
-                return true;
-            }
-
-            // Ist Leaflet schon da, ist es hier vorbei.
-            if (patch(window.L)) return;
-
-            // Sonst ein Wachposten auf `window.L`. Themes laden Leaflet
-            // unterschiedlich frueh; ein reines `if (!window.L) return;`
-            // wuerde bei einem spaeten Theme LAUTLOS nichts tun, und das
-            // Wasserzeichen bliebe — ohne dass irgendwo etwas anschlaegt.
-            try {
-                var wert;
-                Object.defineProperty(window, 'L', {
-                    configurable: true,
-                    get: function () { return wert; },
-                    set: function (v) { wert = v; patch(v); }
-                });
-            } catch (e) { /* Eigenschaft nicht setzbar — die Notnagel unten greifen. */ }
-            document.addEventListener('DOMContentLoaded', function () { patch(window.L); });
-            window.addEventListener('load', function () { patch(window.L); });
-        })();
-        @endif
-    </script>
 
     {{-- Reine Hilfsfunktionen der Live-Karte (ohne DOM, ohne Leaflet).
          Zwischen den Markierungen <lm3-rein> steht Code, den die Tests in
@@ -245,18 +147,217 @@
         // Geplante Fluege (phpVMS-Buchungen) ohne die, die schon live fliegen.
         function geplanteOhneAktive(buchungen, aktive) {
             var fliegt = {};
-            aktive.forEach(function (f) { if (f.callsign) fliegt[String(f.callsign).toUpperCase()] = true; });
+            aktive.forEach(function (f) { if (f.callsign) fliegt[rufzeichenSchluessel(f.callsign)] = true; });
             return buchungen.filter(function (b) {
-                var cs = String(b.callsign || '').toUpperCase();
+                var cs = rufzeichenSchluessel(b.callsign);
                 return !cs || !fliegt[cs];
             });
         }
-        function sortiere(fluege) {
+        // AeroACARS meldet „ITY 4532“, phpVMS kennt „ITY4532“.
+        function rufzeichenSchluessel(cs) {
+            return String(cs == null ? '' : cs).toUpperCase().replace(/[^A-Z0-9]/g, '');
+        }
+
+        // ── Hoehe wie in der 4.7.9-Tafel: ab 18 000 ft als Flugflaeche ──
+        function hoeheText(ft, sprache) {
+            if (ft == null || !isFinite(ft)) return '';
+            if (ft >= 18000) return 'FL' + ('00' + Math.round(ft / 100)).slice(-3);
+            return zahl(ft, sprache) + ' ft';
+        }
+
+        // ── Strecke: Grosskreis in nm; geflogen = gesamt − Rest ──
+        function distanzNm(lat1, lon1, lat2, lon2) {
+            var r = Math.PI / 180;
+            var a = Math.sin((lat2 - lat1) * r / 2), b = Math.sin((lon2 - lon1) * r / 2);
+            var h = a * a + Math.cos(lat1 * r) * Math.cos(lat2 * r) * b * b;
+            return 2 * 3440.065 * Math.asin(Math.min(1, Math.sqrt(h)));
+        }
+        function gueltigerOrt(o) {
+            return !!o && isFinite(o.lat) && isFinite(o.lon) && o.lat !== null && o.lon !== null && !(Math.abs(o.lat) < 0.01 && Math.abs(o.lon) < 0.01);
+        }
+        function fortschritt(dep, arr, pos) {
+            if (!gueltigerOrt(dep) || !gueltigerOrt(arr) || !gueltigerOrt(pos)) return null;
+            var gesamt = distanzNm(dep.lat, dep.lon, arr.lat, arr.lon);
+            if (!(gesamt > 1)) return null;
+            var rest = Math.min(gesamt, distanzNm(pos.lat, pos.lon, arr.lat, arr.lon));
+            var geflogen = Math.max(0, gesamt - rest);
+            return { gesamt: gesamt, rest: rest, geflogen: geflogen, anteil: geflogen / gesamt };
+        }
+
+        // ── Flugzeugklassen (Form + Groesse des Symbols) ──
+        // ICAO-Typ → Klasse nach der Doc-8643-Beschreibung (L1P/L2P, L2T,
+        // L2J-Geschaeftsreise, L2J Schmal-/Grossraum, L4J, H…). Unbekannt →
+        // Schmalrumpf, der haeufigste Fall auf GSG.
+        var KLASSEN = {
+            kolben: { symbol: 'k1', px: 20 }, turboprop: { symbol: 'k2', px: 26 }, bizjet: { symbol: 'k3', px: 22 },
+            schmal: { symbol: 'k4', px: 28 }, gross: { symbol: 'k5', px: 34 }, vier: { symbol: 'k6', px: 38 },
+            heli: { symbol: 'k7', px: 24 }
+        };
+        var TYP_KLASSE = (function () {
+            var t = {}, gruppen = {
+                kolben: 'C150 C152 C162 C170 C172 C175 C177 C180 C182 C185 C195 C206 C207 C210 C310 C337 C340 C402 C414 C421 P28A P28B P28R P28T P28U PA18 PA22 PA24 PA28 PA30 PA31 PA32 PA34 PA38 PA44 PA46 P32R SR20 SR22 S22T DA40 DA42 DA50 DA62 DV20 BE19 BE23 BE24 BE33 BE35 BE36 BE55 BE58 BE60 BE76 BE95 M20P M20T J3 CUB PC6P DR40 DR10 RV4 RV6 RV7 RV8 RV10 RV12 RV14 C42 CRUZ G115 EA30 EXTR TB10 TB20 TB21 GA8 DHC2 DHC3 AN2 Y18 LA4 ICON A5 SAVG',
+                turboprop: 'AT43 AT44 AT45 AT46 AT72 AT73 AT75 AT76 DH8A DH8B DH8C DH8D DHC4 DHC5 DHC6 DHC7 B190 B350 BE20 BE30 BE9L BE9T BE99 BE10 C208 C212 C295 CN35 C27J C130 C30J L382 PC6T PC7 PC9 PC12 PC21 TBM7 TBM8 TBM9 KODI JS31 JS32 JS41 SF34 SB20 D228 D328 E110 E120 F27 F50 SW3 SW4 AN24 AN26 AN28 AN30 AN32 L410 Y12 P180 P46T M600 AC90 AC95 MU2 G21 G73T AT8T AT5T BN2T',
+                bizjet: 'C25A C25B C25C C25M C500 C501 C510 C525 C526 C550 C551 C560 C56X C650 C680 C68A C700 C750 CL30 CL35 CL60 GL5T GL6T GL7T GL8T GLEX GLF2 GLF3 GLF4 GLF5 GLF6 G150 G280 GALX E50P E55P E545 E550 LJ23 LJ24 LJ25 LJ31 LJ35 LJ40 LJ45 LJ55 LJ60 LJ70 LJ75 FA10 FA20 FA50 FA7X FA8X FA6X F2TH F900 H25A H25B H25C HDJT PC24 SF50 PRM1 BE40 ASTR WW24 SBR1 SBR2 J328 EA50 ELIT VSJT',
+                gross: 'A306 A30B A310 A332 A333 A337 A338 A339 A359 A35K B762 B763 B764 B772 B773 B77L B77W B778 B779 B788 B789 B78X DC10 MD11 L101 A3ST BLCF IL86 KC10 K35E',
+                vier: 'A342 A343 A345 A346 A388 A400 B741 B742 B743 B744 B748 B74D B74R B74S B701 B703 K35R E3TF E3CF E6 DC8 DC86 DC87 VC10 IL62 IL76 IL96 A124 A225 C17 C5 C5M B52 CONC B461 B462 B463 RJ70 RJ85 RJ1H P3 L188 C135 KC135 AN22 TU95 TU44',
+                heli: 'H125 H130 H135 H145 H155 H160 H175 H225 EC20 EC25 EC30 EC35 EC45 EC55 EC75 AS32 AS50 AS55 AS65 AS3B B06 B06T B105 B212 B222 B230 B407 B412 B427 B429 B430 B47G B505 R22 R44 R66 S61 S64 S76 S92 A109 A119 A129 A139 A149 A169 A189 AW09 EH10 UH1 UH60 H60 H47 H53 MI8 MI17 MI24 MI26 KA32 G2CA CABR NH90 TIGR LYNX PUMA'
+            };
+            Object.keys(gruppen).forEach(function (k) { gruppen[k].split(' ').forEach(function (typ) { if (typ) t[typ] = k; }); });
+            return t;
+        })();
+        function flugzeugKlasse(icao) {
+            var k = String(icao == null ? '' : icao).toUpperCase().trim();
+            return Object.prototype.hasOwnProperty.call(TYP_KLASSE, k) ? TYP_KLASSE[k] : 'schmal';
+        }
+        function klassenInfo(klasse) { return KLASSEN[klasse] || KLASSEN.schmal; }
+        // Am Boden etwas kleiner, damit sich ein voller Flughafen nicht stapelt.
+        var BODEN_PHASEN = { PREFLIGHT: 1, BOARDING: 1, PUSHBACK: 1, TAXI_OUT: 1, TAXI_IN: 1, BLOCKS_ON: 1, ON_BLOCK: 1, ARRIVED: 1, PIREP_SUBMITTED: 1 };
+        function amBoden(phase) { return !!BODEN_PHASEN[String(phase || '').toUpperCase()]; }
+        // ── Sortierung der Tafel (Spaltenkoepfe) ──
+        // Standard „phase“: Flugreihenfolge (Preflight … Arrived), in der Phase
+        // nach Rest-Strecke. Offline immer unten, fehlende Werte immer hinten,
+        // Rufzeichen mit Zahlen natuerlich (GSG7 vor GSG101). `weg(f)` liefert
+        // die Strecke ({rest}) oder null — die Flughaefen kennt nur das Widget.
+        var SORT_WERT = {
+            flug: function (f) { return f.callsign || f.id; },
+            route: function (f) { return (f.dep || '') + ' ' + (f.arr || ''); },
+            hoehe: function (f) { return f.pos ? f.pos.alt_ft : null; },
+            gs: function (f) { return f.pos ? f.pos.gs_kt : null; },
+            pilot: function (f) { return f.pilot_name || f.pilot; },
+            zeit: function (f) { return f.zeit; }
+        };
+        function phasenRang(p) {
+            p = String(p || '').toUpperCase();
+            if (p === 'ON_BLOCK') p = 'BLOCKS_ON';
+            var i = PHASE_LIST.indexOf(p);
+            return i < 0 ? PHASE_LIST.length : i;
+        }
+        function vergleicheWert(a, b) {
+            var leerA = a == null || a === '' || (typeof a === 'number' && !isFinite(a));
+            var leerB = b == null || b === '' || (typeof b === 'number' && !isFinite(b));
+            if (leerA || leerB) return leerA === leerB ? 0 : (leerA ? 2 : -2);   // ±2: hinten, egal welche Richtung
+            var c = (typeof a === 'number' && typeof b === 'number') ? a - b
+                : String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
+            return c < 0 ? -1 : (c > 0 ? 1 : 0);
+        }
+        function sortiereNach(fluege, schluessel, richtung, weg) {
+            var rest = function (f) { var w = weg ? weg(f) : null; return w ? w.rest : null; };
+            var dreh = richtung === 'ab' ? -1 : 1;
+            var stufe = function (c) { return Math.abs(c) === 2 ? c : dreh * c; };
+            var nachRufzeichen = function (a, b) { return vergleicheWert(SORT_WERT.flug(a), SORT_WERT.flug(b)); };
             return fluege.slice().sort(function (a, b) {
                 var off = (a.status === 'offline') - (b.status === 'offline');
                 if (off) return off;
-                return String(a.callsign || a.id).localeCompare(String(b.callsign || b.id));
+                var c;
+                if (schluessel === 'phase') {
+                    c = dreh * (phasenRang(a.phase) - phasenRang(b.phase));
+                    if (!c) c = vergleicheWert(rest(a), rest(b));
+                    if (Math.abs(c) === 2) return c;
+                } else if (schluessel === 'rest') {
+                    c = stufe(vergleicheWert(rest(a), rest(b)));
+                } else {
+                    c = stufe(vergleicheWert((SORT_WERT[schluessel] || SORT_WERT.flug)(a), (SORT_WERT[schluessel] || SORT_WERT.flug)(b)));
+                }
+                return c || nachRufzeichen(a, b);
             });
+        }
+
+        // ── VATSIM/IVAO-Lotsen: Regeln nach dem Verfahren von VATSIM Radar ──
+        // (Vorlage aeroacars-live recorder/src/atcKarte.ts; Regeln CC BY-NC 4.0).
+        // Beobachter melden sich auf 199.998; nur 117–137 MHz ist Sprechfunk.
+        function aufSprechfrequenz(f) {
+            var khz = Math.round(parseFloat(f) * 1000);
+            return isFinite(khz) && khz >= 117000 && khz <= 137000;
+        }
+        function erstesWort(t) { return String(t).split(/[_-]/)[0]; }
+        // VATSpy.dat auswerten. Platz-Schluessel: Funk-Praefix vor ICAO, echter
+        // Platz vor Behelf (so loest CLT_GND nach KCLT auf, wie KCLT_ATIS).
+        function vatspyLesen(text) {
+            var plaetze = {}, namen = {}, firNachWort = {}, uirNachWort = {}, firNamen = {}, roh = [], abschnitt = '';
+            String(text || '').split(/\r?\n/).forEach(function (zeile) {
+                zeile = zeile.trim();
+                if (!zeile || zeile.charAt(0) === ';') return;
+                if (zeile.charAt(0) === '[') { abschnitt = zeile.toUpperCase(); return; }
+                var t = zeile.split('|');
+                if (abschnitt === '[AIRPORTS]') {
+                    if (t.length < 4) return;
+                    var icao = t[0].trim().toUpperCase(), lat = parseFloat(t[2]), lon = parseFloat(t[3]);
+                    if (!icao || !isFinite(lat) || !isFinite(lon)) return;
+                    if (t[1] && !namen[icao]) namen[icao] = t[1].trim();
+                    roh.push({ icao: icao, lat: lat, lon: lon, praefix: (t[4] || '').trim().toUpperCase(), behelf: (t[6] || '').trim() === '1' });
+                } else if (abschnitt === '[FIRS]') {
+                    if (t.length < 4) return;
+                    var e = { icao: t[0].trim().toUpperCase(), name: (t[1] || '').trim(), praefix: (t[2] || '').trim().toUpperCase(), grenze: (t[3] || '').trim().toUpperCase() };
+                    if (!e.grenze) return;
+                    if (e.name) { if (!firNamen[e.icao]) firNamen[e.icao] = e.name; if (e.praefix && !firNamen[e.praefix]) firNamen[e.praefix] = e.name; }
+                    var schon = {};
+                    [erstesWort(e.icao), e.praefix ? erstesWort(e.praefix) : ''].forEach(function (k) {
+                        if (!k || schon[k]) return;
+                        schon[k] = 1;
+                        (firNachWort[k] = firNachWort[k] || []).push(e);
+                    });
+                } else if (abschnitt === '[UIRS]') {
+                    if (t.length < 3) return;
+                    var uid = t[0].trim().toUpperCase();
+                    var firs = t[2].toUpperCase().split(',').map(function (x) { return x.trim(); }).filter(Boolean);
+                    if (!uid || !firs.length) return;
+                    (uirNachWort[erstesWort(uid)] = uirNachWort[erstesWort(uid)] || []).push({ icao: uid, name: (t[1] || '').trim(), firs: firs });
+                }
+            });
+            function belege(schluessel, nimm) {
+                roh.forEach(function (p) {
+                    if (!nimm(p)) return;
+                    var k = schluessel(p);
+                    if (k && !plaetze[k]) plaetze[k] = [p.lat, p.lon];
+                });
+            }
+            belege(function (p) { return p.praefix; }, function (p) { return p.praefix && !p.behelf; });
+            belege(function (p) { return p.praefix; }, function (p) { return p.praefix && p.behelf; });
+            belege(function (p) { return p.icao; }, function (p) { return !p.behelf; });
+            belege(function (p) { return p.icao; }, function () { return true; });
+            return { plaetze: plaetze, namen: namen, firNachWort: firNachWort, uirNachWort: uirNachWort, firNamen: firNamen };
+        }
+        // Laengster Eintrag, dessen Kennung am Anfang des Rufzeichens steht; ein
+        // exakter Treffer auf das Rufzeichen ohne letztes Wort schlaegt alles.
+        // Gleich gute Treffer alle (LPPO_CTR: Ozean-FIR und Azoren-Zone).
+        function firTreffer(rufzeichen, firNachWort) {
+            var ruf = String(rufzeichen || '').toUpperCase(), teile = ruf.split(/[_-]/);
+            var mitte = teile.slice(0, -1).join('_'), beste = -1, treffer = [];
+            (firNachWort[teile[0]] || []).forEach(function (e) {
+                var kennung = e.praefix || e.icao;
+                if (ruf.indexOf(kennung) !== 0 && ruf.indexOf(e.icao) !== 0) return;
+                var laenge = (e.praefix === mitte || e.icao === mitte) ? 100 : kennung.length;
+                if (laenge > beste) { beste = laenge; treffer = [e]; }
+                else if (laenge === beste) treffer.push(e);
+            });
+            return treffer;
+        }
+        // Grenz-Kennungen eines Center-/FSS-Lotsen. Sammelposition (GULF, CARI)
+        // vor Einzel-FIR. Kein Frequenzriegel: VATSIM Radar zeigt Sektoren nach
+        // der Rufzeichen-Endung (LPPC_X1_CTR).
+        function grenzenFuerLotse(rufzeichen, firNachWort, uirNachWort) {
+            var ruf = String(rufzeichen || '').toUpperCase(), wort = erstesWort(ruf);
+            // Laengste passende Sammelposition (AFRE_E vor AFRE).
+            var uir = null;
+            (uirNachWort[wort] || []).forEach(function (u) {
+                if (ruf.indexOf(u.icao) === 0 && (!uir || u.icao.length > uir.icao.length)) uir = u;
+            });
+            if (uir) return { kennungen: uir.firs.slice(), name: uir.name, uir: true };
+            var t = firTreffer(ruf, firNachWort);
+            var kennungen = [];
+            t.forEach(function (e) { if (kennungen.indexOf(e.grenze) === -1) kennungen.push(e.grenze); });
+            return { kennungen: kennungen, name: t.length ? t[0].name : '', uir: false };
+        }
+        // Sechs FIRs fuehren zwei Flaechen (kontinental/ozeanisch); _FSS betreut den Ozean.
+        function firFlaeche(liste, rufzeichen) {
+            if (!liste || !liste.length) return null;
+            if (liste.length === 1) return liste[0];
+            var willOzean = /_FSS$/i.test(String(rufzeichen || ''));
+            for (var i = 0; i < liste.length; i++) {
+                var p = liste[i].properties || {};
+                if ((String(p.oceanic == null ? '0' : p.oceanic) === '1') === willOzean) return liste[i];
+            }
+            return liste[0];
         }
 
         wurzel.LM3 = {
@@ -265,7 +366,11 @@
             formatSimLabel: formatSimLabel, fmtQnhBoth: fmtQnhBoth, ageString: ageString, zahl: zahl,
             vsText: vsText, apFlags: apFlags, tonnen: tonnen,
             neben: neben, fortlaufend: fortlaufend, verschiebeNahe: verschiebeNahe,
-            fehlerIstVoruebergehend: fehlerIstVoruebergehend, filterNachPhase: filterNachPhase, geplanteOhneAktive: geplanteOhneAktive, sortiere: sortiere
+            fehlerIstVoruebergehend: fehlerIstVoruebergehend, filterNachPhase: filterNachPhase, geplanteOhneAktive: geplanteOhneAktive, sortiereNach: sortiereNach, phasenRang: phasenRang,
+            rufzeichenSchluessel: rufzeichenSchluessel, hoeheText: hoeheText, distanzNm: distanzNm, fortschritt: fortschritt,
+            KLASSEN: KLASSEN, flugzeugKlasse: flugzeugKlasse, klassenInfo: klassenInfo, amBoden: amBoden,
+            aufSprechfrequenz: aufSprechfrequenz, vatspyLesen: vatspyLesen, firTreffer: firTreffer,
+            grenzenFuerLotse: grenzenFuerLotse, firFlaeche: firFlaeche
         };
     })(typeof window !== 'undefined' ? window : globalThis);
     /* </lm3-rein> */
@@ -273,6 +378,9 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', function () {
+            // Ab hier nur das eigene Leaflet (siehe Kopf), nie das des Themes.
+            var L = window.LM_L;
+            if (!L) { console.error('[LiveMap] eigenes Leaflet 1.9.4 nicht geladen — Karte kann nicht starten'); return; }
             var LIVE_MAP_UI = @json($liveMapUiConfig);
             window.LIVE_MAP_UI = LIVE_MAP_UI || {};
 
@@ -636,8 +744,9 @@
             var PHPVMS_BASE       = window.location.origin;   // auto-detect
             var VATSIM_DATA_API   = 'https://data.vatsim.net/v3/vatsim-data.json';
             var VATSIM_TRX_API    = 'https://data.vatsim.net/v3/transceivers-data.json';
-            var VATSPY_BOUNDS_API = 'https://raw.githubusercontent.com/vatsimnetwork/vatspy-data-project/master/Boundaries.geojson';
-            var VATSPY_DAT_API    = 'https://raw.githubusercontent.com/vatsimnetwork/vatspy-data-project/master/VATSpy.dat';
+            // jsDelivr statt raw.githubusercontent.com: Browser-Puffer 7 Tage statt 5 min.
+            var VATSPY_BOUNDS_API = 'https://cdn.jsdelivr.net/gh/vatsimnetwork/vatspy-data-project@master/Boundaries.geojson';
+            var VATSPY_DAT_API    = 'https://cdn.jsdelivr.net/gh/vatsimnetwork/vatspy-data-project@master/VATSpy.dat';
             var IVAO_DATA_API     = 'https://api.ivao.aero/v2/tracker/whazzup';
             var VATSIM_REFRESH_MS = 30000;
             var IVAO_REFRESH_MS   = 15000;
@@ -692,6 +801,9 @@
             var ctrlPosCache     = {};
             var firPrefixMap     = {};
             var uirToFirsMap     = {};
+            var vatspyFir        = { firNachWort: {}, uirNachWort: {} };
+            var letzteIvaoFirMap = null;   // fuer sofortiges Zeichnen beim Einschalten der Sektoren
+            var grenzenNachId    = null;   // Boundaries-id -> [Feature, ...] (kontinental/ozeanisch)
 
             var CTRL_TYPES = {
                 0:{label:'OBS',color:'#95a5a6'}, 1:{label:'FSS',color:'#8e44ad'},
@@ -777,23 +889,23 @@
                     '<img src="' + h(logoUrl) + '" style="max-height:38px;max-width:140px;object-fit:contain;vertical-align:middle" onerror="this.closest(\'div\').remove();" alt="' + h(icao) + '"></div>';
             }
 
-            function buildAircraftIcon(heading) {
+            // Netzwerk-Piloten (VATSIM/IVAO): dieselbe Schmalrumpf-Silhouette,
+            // grau und kleiner, damit die eigenen VA-Fluege herausstechen.
+            function netzFliegerIcon(heading, ivao) {
                 var hdg = parseFloat(heading);
                 if (!isFinite(hdg)) hdg = 0;
-                var svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="22" height="22"><g transform="rotate(' + hdg + ',16,16)"><ellipse cx="16" cy="16" rx="2.5" ry="10" fill="#1a6fc4"/><polygon points="16,14 3,20 3,22 16,18 29,22 29,20" fill="#1a6fc4"/><polygon points="16,24 10,29 10,30 16,27 22,30 22,29" fill="#1a6fc4"/><ellipse cx="16" cy="10" rx="1.5" ry="3" fill="rgba(255,255,255,0.35)"/></g></svg>';
-                return L.divIcon({ html:'<img src="data:image/svg+xml;base64,' + btoa(svg) + '" width="22" height="22" style="display:block">', className:'', iconSize:[22,22], iconAnchor:[11,11] });
+                return L.divIcon({
+                    html: '<span class="lm3-netz-flieger' + (ivao ? ' ist-ivao' : '') + '" style="display:block;width:18px;height:18px;transform:rotate(' + Math.round(hdg) + 'deg)">' +
+                        '<svg viewBox="0 0 64 64" width="18" height="18" style="stroke-width:3.6"><use href="#lm-k4"/></svg></span>',
+                    className: '', iconSize: [18, 18], iconAnchor: [9, 9]
+                });
             }
-
-            function buildIvaoAircraftIcon(heading) {
-                var hdg = parseFloat(heading);
-                if (!isFinite(hdg)) hdg = 0;
-                var svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="22" height="22"><g transform="rotate(' + hdg + ',16,16)"><ellipse cx="16" cy="16" rx="2.5" ry="10" fill="#e67e22"/><polygon points="16,14 3,20 3,22 16,18 29,22 29,20" fill="#e67e22"/><polygon points="16,24 10,29 10,30 16,27 22,30 22,29" fill="#e67e22"/><ellipse cx="16" cy="10" rx="1.5" ry="3" fill="rgba(255,255,255,0.35)"/></g></svg>';
-                return L.divIcon({ html:'<img src="data:image/svg+xml;base64,' + btoa(svg) + '" width="22" height="22" style="display:block">', className:'', iconSize:[22,22], iconAnchor:[11,11] });
-            }
+            function buildAircraftIcon(heading) { return netzFliegerIcon(heading, false); }
+            function buildIvaoAircraftIcon(heading) { return netzFliegerIcon(heading, true); }
 
             function buildAirportCtrlIcon(icao, ctrlList, atisList) {
-                var TYPES = { 2:{short:'D',color:'#3498db'}, 3:{short:'G',color:'#e67e22'}, 4:{short:'T',color:'#e74c3c'}, 5:{short:'A',color:'#27ae60'} };
-                var order = [2,3,4,5];
+                var TYPES = { 0:{short:'O',color:'#7f8c8d'}, 2:{short:'D',color:'#3498db'}, 3:{short:'G',color:'#e67e22'}, 4:{short:'T',color:'#e74c3c'}, 5:{short:'A',color:'#27ae60'} };
+                var order = [2,3,4,0,5];
                 var counts = {};
                 ctrlList.forEach(function(c){ if(TYPES[c.facility]) counts[c.facility]=(counts[c.facility]||0)+1; });
                 var ac = atisList ? atisList.length : 0;
@@ -872,9 +984,9 @@
             }
 
             function buildAirportCtrlPopup(icao, ctrlList, atisList) {
-                var order={2:1,3:2,4:3,5:4};
+                var order={2:1,3:2,4:3,0:4,5:5};
                 ctrlList=ctrlList.slice().sort(function(a,b){return(order[a.facility]||9)-(order[b.facility]||9);});
-                var BADGE={2:{label:'DEL',color:'#2980b9'},3:{label:'GND',color:'#d35400'},4:{label:'TWR',color:'#c0392b'},5:{label:'APP',color:'#27ae60'}};
+                var BADGE={0:{label:'OBS',color:'#7f8c8d'},2:{label:'DEL',color:'#2980b9'},3:{label:'GND',color:'#d35400'},4:{label:'TWR',color:'#c0392b'},5:{label:'APP',color:'#27ae60'}};
                 var ctrlRows=ctrlList.map(function(c){
  var t=BADGE[c.facility]||{label:'ATC',color:'#7f8c8d'};return '<div style="padding:7px 0;border-bottom:1px solid #f0f0f0"><div style="display:flex;align-items:center;gap:8px;margin-bottom:3px"><span style="background:'+t.color+';color:#fff;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.5px;flex-shrink:0">'+h(t.label)+'</span><span style="font-size:13px;font-weight:700;color:#1a1a1a">'+h(c.callsign||'—')+'</span><span style="font-size:12px;color:#888;margin-left:auto">'+h(safeFreq(c.frequency||''))+'</span></div>'+ctrlInfoLine(c)+'</div>';}).join('');
                 var atisRows='';
@@ -976,8 +1088,16 @@
                     var normId=rawId.replace(/-/g,'_');
                     featureById[normId]=feature; featureById[rawId]=feature;
                 });
+                if(!grenzenNachId){
+                    grenzenNachId={};
+                    firBoundsGeoJson.features.forEach(function(feature){
+                        var id=String((feature.properties||{}).id||feature.id||'').toUpperCase();
+                        if(id)(grenzenNachId[id]=grenzenNachId[id]||[]).push(feature);
+                    });
+                }
                 var claimedFeatures={};
                 var ctrlFeatureMap={};
+                var schonGezeichnet=[];
                 function _norm(s){return s.replace(/-/g,'_');}
                 Object.keys(activeFirMap).forEach(function(mapKey){
                     var info=activeFirMap[mapKey];
@@ -985,15 +1105,23 @@
                     var isSubKey=mapKey.indexOf('_')!==-1;
                     var resolvedRoot=firPrefixMap[root]||root;
                     var features=[];
+                    /* Radar-Verfahren: VATSpy-Grenzkennungen (laengster Praefix, Sammelposition, _FSS = Ozean) */
+                    (info.kennungen||[]).forEach(function(k){
+                        var ft=window.LM3.firFlaeche(grenzenNachId[String(k).toUpperCase()],info.callsign);
+                        if(ft&&features.indexOf(ft)===-1)features.push(ft);
+                    });
+                    if(features.length&&info.firName&&!firNameCache[root])firNameCache[root]=info.firName;
+                    /* Rueckfall: die bisherige Grob-Zuordnung, wenn VATSpy keinen Eintrag kennt */
                     /* Phase 1: exact sub-key match (sectored callsigns like UNKL_N_CTR) */
-                    if(isSubKey){var f=featureById[mapKey]||featureById[mapKey.replace(/_/g,'-')];if(f){features=[f];claimedFeatures[mapKey]=true;claimedFeatures[mapKey.replace(/_/g,'-')]=true;}}
+                    if(features.length===0&&isSubKey){var f=featureById[mapKey]||featureById[mapKey.replace(/_/g,'-')];if(f){features=[f];claimedFeatures[mapKey]=true;claimedFeatures[mapKey.replace(/_/g,'-')]=true;}}
                     /* Phase 2: broad normalised search — runs for ALL keys when Phase 1 missed */
                     if(features.length===0){var nR=_norm(root),nRe=_norm(resolvedRoot);Object.keys(featureById).forEach(function(fK){if(claimedFeatures[fK])return;var nk=_norm(fK),ft=featureById[fK];if(nk===nRe||nk===nR||nk==='K'+nR||nR==='K'+nk){if(features.indexOf(ft)===-1)features.push(ft);}});}
                     /* Phase 3: startsWith fallback for sub-sector GeoJSON IDs (e.g. UNKL-1) */
                     if(features.length===0){var nR2=_norm(root),nRe2=_norm(resolvedRoot);Object.keys(featureById).forEach(function(fK){if(claimedFeatures[fK])return;var nk=_norm(fK),ft=featureById[fK];if(nk.indexOf(nRe2+'_')===0||nk.indexOf(nR2+'_')===0){if(features.indexOf(ft)===-1)features.push(ft);}});}
                     /* Phase 4: UIR expansion — resolve UIR (e.g. RU-SC) to constituent FIR polygons */
                     if(features.length===0){var uirFirs=uirToFirsMap[root]||uirToFirsMap[resolvedRoot]||uirToFirsMap[_norm(root)]||null;if(uirFirs){uirFirs.forEach(function(fid){var nfid=_norm(fid);var ft=featureById[nfid]||featureById[fid];if(ft&&features.indexOf(ft)===-1)features.push(ft);});if(features.length)info.isUpper=true;}}
-                    if(features.length>0) ctrlFeatureMap[mapKey]=features;
+                    features=features.filter(function(ft){return schonGezeichnet.indexOf(ft)===-1;});
+                    if(features.length>0){ctrlFeatureMap[mapKey]=features;schonGezeichnet=schonGezeichnet.concat(features);}
                 });
 
                 Object.keys(ctrlFeatureMap).forEach(function(matchKey){
@@ -1052,7 +1180,7 @@
                     var labelW=Math.max(short.length*8+16,64), labelH=36;
                     (anDerDatumsgrenze ? [0, 360, -360] : [0]).forEach(function(d){
                     L.marker([center[0], center[1] + d],{
-                        icon:L.divIcon({html:'<div style="background:'+color+';color:#fff;padding:3px 9px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.5px;box-shadow:0 2px 5px rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.5);white-space:nowrap;text-align:center">'+shortSafe+'<br><span style="font-size:9px;font-weight:400;opacity:0.85">'+firLabelSafe+'</span></div>',className:'',iconSize:[labelW,labelH],iconAnchor:[labelW/2,labelH/2]}),
+                        icon:L.divIcon({html:'<div style="background:'+color+';color:#fff;padding:3px 9px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.5px;box-shadow:0 2px 5px rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.5);white-space:nowrap;text-align:center">'+shortSafe+'<br><span style="font-size:9px;font-weight:400;opacity:0.85">'+firLabelSafe+'</span></div>',className:'lm3-sektor-etikett',iconSize:[labelW,labelH],iconAnchor:[labelW/2,labelH/2]}),
                         zIndexOffset: -200,
                         interactive: false,
                         keyboard: false,
@@ -1083,14 +1211,15 @@
                 var ac=atisList?atisList.length:0,hasApp=!!(counts[5]),appCount=counts[5]||0;
                 var dots=order.filter(function(f){return f!==5&&counts[f];}).map(function(f){var t=TYPES[f],n=counts[f];return '<span style="position:relative;display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:3px;background:'+t.color+';color:#fff;font-size:8px;font-weight:800;box-shadow:0 1px 2px rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.5)">'+t.short+(n>1?'<span style="position:absolute;top:-4px;right:-4px;background:#c0392b;color:#fff;border-radius:50%;width:9px;height:9px;font-size:6px;display:flex;align-items:center;justify-content:center;border:1px solid #fff;line-height:1;font-weight:900">'+n+'</span>':'')+'</span>';}).join('');
                 if(hasApp||ac>0){var hasAtis=ac>0,badgeText,badgeBg,badgeW2=18,badgeH2=18,badgeRadius='4px';if(hasApp&&hasAtis){badgeText='A<span style="font-style:italic;font-size:9px;opacity:0.9">i</span>';badgeBg='#27ae60';badgeW2=22;}else if(hasApp){badgeText='A';badgeBg='#27ae60';}else{badgeText='<span style="font-style:italic">i</span>';badgeBg='#5dade2';badgeRadius='50%';}dots+='<span style="position:relative;display:inline-flex;align-items:center;justify-content:center;width:'+badgeW2+'px;height:'+badgeH2+'px;border-radius:'+badgeRadius+';background:'+badgeBg+';color:#fff;font-size:9px;font-weight:900;box-shadow:0 1px 4px rgba(0,0,0,0.5);border:1.5px solid rgba(255,255,255,0.6)">'+badgeText+'</span>';}
-                var w=Math.max((Object.keys(counts).length+1)*18,icao.length*7+8,30)+16,hgt=36;
-                return L.divIcon({html:'<div style="width:'+w+'px;height:'+hgt+'px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;outline:2px solid #e67e22;border-radius:3px;outline-offset:1px"><span style="font-size:9px;font-weight:700;color:#1a1a1a;text-shadow:0 0 3px #fff,0 0 3px #fff;letter-spacing:.3px;line-height:1">'+h(icao)+'</span><div style="display:flex;gap:2px;align-items:center">'+dots+'</div></div>',className:'ivao-airport-marker',iconSize:[w,hgt],iconAnchor:[w/2,hgt/2]});
+                // Netz-Zusatz "IVAO" statt Rahmen: steht ein VATSIM-Kasten daneben, bleiben beide unterscheidbar.
+                var w=Math.max((Object.keys(counts).length+1)*18,icao.length*7+30,30)+16,hgt=36;
+                return L.divIcon({html:'<div style="width:'+w+'px;height:'+hgt+'px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer"><span style="font-size:9px;font-weight:700;color:#1a1a1a;text-shadow:0 0 3px #fff,0 0 3px #fff;letter-spacing:.3px;line-height:1">'+h(icao)+' <span style="font-size:7px;font-weight:800;color:#5b6472">IVAO</span></span><div style="display:flex;gap:2px;align-items:center">'+dots+'</div></div>',className:'ivao-airport-marker',iconSize:[w,hgt],iconAnchor:[w/2,hgt/2]});
             }
 
             function buildAirportCtrlPopupIvao(icao, ctrlList, atisList) {
-                var order={2:1,3:2,4:3,5:4};
+                var order={2:1,3:2,4:3,0:4,5:5};
                 ctrlList=ctrlList.slice().sort(function(a,b){return(order[a.facility]||9)-(order[b.facility]||9);});
-                var BADGE={2:{label:'DEL',color:'#2980b9'},3:{label:'GND',color:'#d35400'},4:{label:'TWR',color:'#c0392b'},5:{label:'APP',color:'#27ae60'}};
+                var BADGE={0:{label:'OBS',color:'#7f8c8d'},2:{label:'DEL',color:'#2980b9'},3:{label:'GND',color:'#d35400'},4:{label:'TWR',color:'#c0392b'},5:{label:'APP',color:'#27ae60'}};
                 var ctrlRows=ctrlList.map(function(c){
                     var t=BADGE[c.facility]||{label:'ATC',color:'#7f8c8d'};
                     return '<div style="padding:7px 0;border-bottom:1px solid #f0f0f0"><div style="display:flex;align-items:center;gap:8px;margin-bottom:3px"><span style="background:'+t.color+';color:#fff;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.5px;flex-shrink:0">'+h(t.label)+'</span><span style="font-size:13px;font-weight:700;color:#1a1a1a">'+h(c.callsign||'—')+'</span><span style="font-size:12px;color:#888;margin-left:auto">'+h(safeFreq(c.frequency||''))+'</span></div>'+ctrlInfoLine(c)+'</div>';
@@ -1112,9 +1241,34 @@
                 return '<div class="vatsim-popup"><div class="vatsim-popup-header"><div class="vatsim-popup-callsign">'+h(icao)+'</div><div style="display:flex;align-items:center;gap:6px;margin-top:2px">'+(airportFullName?'<span class="vatsim-popup-route" style="margin:0">'+h(airportFullName)+'</span>':'')+'<span style="background:#e67e22;color:#fff;font-size:8px;font-weight:700;padding:2px 6px;border-radius:3px;letter-spacing:.5px;flex-shrink:0">IVAO</span></div><div style="font-size:11px;color:#aaa;margin-top:3px">'+total+' station'+(total!==1?'s':'')+' active</div></div><div class="vatsim-popup-body">'+ctrlRows+atisRows+'</div></div>';
             }
 
+            // Abruf mit Zeitgrenze bis einschliesslich Antwortkoerper: ein haengender Feed
+            // blockiert sonst den naechsten Takt (vatsimFetchInFlight bliebe gesetzt).
+            // Nicht-200 zaehlt als Fehler. art: 'json' oder 'text'.
+            function holeMitFrist(url, ms, art) {
+                var ab = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+                var t = ab ? setTimeout(function(){ ab.abort(); }, ms || 20000) : null;
+                return fetch(url, ab ? { signal: ab.signal } : undefined).then(function(r){
+                    if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + url);
+                    return art === 'text' ? r.text() : r.json();
+                }).finally(function(){ if (t) clearTimeout(t); });
+            }
+            var firNamesLauf = null, grenzenLauf = null;
+            // Nach einem Fehlschlag 5 min Pause: die Dateien sind 2,3 und 0,9 MB gross.
+            var PAUSE_NACH_FEHLER_MS = 5 * 60 * 1000, grenzenNichtVor = 0, firNamenNichtVor = 0;
+            // Boundaries.geojson einmal laden.
+            function ladeGrenzen() {
+                if (firBoundsGeoJson) return Promise.resolve();
+                if (grenzenLauf) return grenzenLauf;
+                if (Date.now() < grenzenNichtVor) return Promise.reject(new Error('Boundaries: Pause nach Fehlschlag'));
+                grenzenLauf = holeMitFrist(VATSPY_BOUNDS_API, 60000, 'json').then(function(gj){firBoundsGeoJson=gj;grenzenNachId=null;})
+                    .catch(function(e){ grenzenNichtVor = Date.now() + PAUSE_NACH_FEHLER_MS; throw e; })
+                    .finally(function(){ grenzenLauf = null; });
+                return grenzenLauf;
+            }
             function loadFirNames() {
-                if (firNameLoaded) return Promise.resolve();
-                return fetch(VATSPY_DAT_API).then(function(r){return r.text();}).then(function(text){
+                if (firNameLoaded || Date.now() < firNamenNichtVor) return Promise.resolve();
+                if (firNamesLauf) return firNamesLauf;
+                return firNamesLauf = holeMitFrist(VATSPY_DAT_API, 60000, 'text').then(function(text){
                     firNameLoaded=true; staticAirportLoaded=true;
                     var section='';
                     text.split('\n').forEach(function(line){
@@ -1122,10 +1276,7 @@
                         if(!line||line.startsWith(';')) return;
                         if(line.startsWith('[')){section=line.replace(/[\[\]]/g,'').toLowerCase();return;}
                         var parts=line.split('|');
-                        if(section==='airports'&&parts.length>=4){
-                            var icao=parts[0].trim().toUpperCase(),aname=parts[1].trim(),lat=parseFloat(parts[2]),lon=parseFloat(parts[3]);
-                            if(icao&&!isNaN(lat)&&!isNaN(lon)){staticAirportPos[icao]=[lat,lon];if(aname)airportNameCache[icao]=aname;}
-                        } else if(section==='firs'&&parts.length>=2){
+                        if(section==='firs'&&parts.length>=2){
                             var ficao=parts[0].trim().toUpperCase(),name=parts[1].trim(),prefix=(parts[2]||'').trim().toUpperCase();
                             if(ficao&&name){firNameCache[ficao]=name;if(prefix){firNameCache[prefix]=name;firPrefixMap[prefix]=ficao;firPrefixMap[ficao]=ficao;}}
                         } else if(section==='uirs'&&parts.length>=2){
@@ -1144,11 +1295,16 @@
                             if(uid&&allFirs.length){uirToFirsMap[uid]=allFirs;firPrefixMap[uid]=uid;}
                         }
                     });
-                }).catch(function(e){firNameLoaded=true;staticAirportLoaded=true;console.warn('[VATSIM] VATSpy.dat nicht geladen:',e);});
+                    // Plaetze und FIR-Zuordnung nach dem Radar-Verfahren (reiner Block, getestet).
+                    var v=window.LM3.vatspyLesen(text);
+                    staticAirportPos=v.plaetze; airportNameCache=v.namen;
+                    Object.keys(v.firNamen).forEach(function(k){if(!firNameCache[k])firNameCache[k]=v.firNamen[k];});
+                    vatspyFir=v;
+                }).catch(function(e){firNameLoaded=false;firNamenNichtVor=Date.now()+PAUSE_NACH_FEHLER_MS;console.warn('[VATSIM] VATSpy.dat nicht geladen, neuer Versuch in 5 min:',e);}).finally(function(){firNamesLauf=null;});
             }
 
             function loadTransceivers() {
-                return fetch(VATSIM_TRX_API).then(function(r){return r.json();}).then(function(trxList){
+                return holeMitFrist(VATSIM_TRX_API, 20000, 'json').then(function(trxList){
                     ctrlPosCache={};
                     (trxList||[]).forEach(function(entry){
                         if(!entry.callsign||!entry.transceivers||!entry.transceivers.length) return;
@@ -1158,13 +1314,13 @@
                 }).catch(function(err){console.warn('[VATSIM] Transceivers nicht geladen:',err);});
             }
 
-            function normalizeKey(prefix) {
-                if(staticAirportPos[prefix]) return prefix;
-                if(staticAirportPos['K'+prefix]) return 'K'+prefix;
-                if(staticAirportPos['C'+prefix]) return 'C'+prefix;
-                if(staticAirportPos['P'+prefix]) return 'P'+prefix;
-                if(prefix.length===4&&prefix[0]==='K'&&staticAirportPos[prefix.slice(1)]) return prefix.slice(1);
-                return prefix;
+            // Platz zu einem Rufzeichen-Praefix (VATSpy: Funk-Praefix vor ICAO), sonst null.
+            function platzZu(prefix) { return staticAirportPos[prefix] || null; }
+            // Gruppen-Schluessel = aufgeloeste Stelle, nicht der Praefix: CLT_GND und
+            // KCLT_ATIS gehoeren in denselben Kasten. Anzeige: der laengste Code (ICAO).
+            function platzSchluessel(prefix) {
+                var k = platzZu(prefix);
+                return k ? '@' + k[0].toFixed(5) + ',' + k[1].toFixed(5) : prefix;
             }
 
             function distKm(a,b) {
@@ -1177,7 +1333,7 @@
                 if (vatsimFetchInFlight) return Promise.resolve(false);
                 vatsimFetchInFlight = true;
                 return Promise.all([
-                    fetch(VATSIM_DATA_API).then(function(r){return r.json();}),
+                    holeMitFrist(VATSIM_DATA_API, 20000, 'json'),
                     loadTransceivers(),
                     loadFirNames()
                 ]).then(function(results){
@@ -1195,33 +1351,34 @@
                     });
 
                     var controllers=data.controllers||[], atisRaw=data.atis||[], ctrlDone=0;
-                    var atisGroups={}, airportGroups={}, centerList=[];
+                    var atisGroups={}, airportGroups={}, centerList=[], anzeige={};
+                    // Anzeigename je Platz-Gruppe: der laengste Praefix (KCLT vor CLT).
+                    function merkeName(key,raw){if(!anzeige[key]||raw.length>anzeige[key].length)anzeige[key]=raw;}
 
                     atisRaw.forEach(function(a){
-                        var raw=a.callsign.split('_')[0].toUpperCase(), key=normalizeKey(raw);
-                        var pos=staticAirportPos[key]||staticAirportPos[raw]||null;
-                        if(!pos)(data.airports||[]).forEach(function(ap){if(!pos&&(ap.icao===raw||ap.icao===key)){var lt=parseFloat(ap.latitude||ap.lat),ln=parseFloat(ap.longitude||ap.lon);if(!isNaN(lt)&&!isNaN(ln))pos=[lt,ln];}});
-                        if(!pos) pos=ctrlPosCache[a.callsign.toUpperCase()];
+                        // ATIS ausserhalb 117–137 MHz (VOR-ATIS, Beobachter) zaehlt nicht, wie VATSIM Radar.
+                        if(!window.LM3.aufSprechfrequenz(a.frequency)) return;
+                        var raw=a.callsign.split('_')[0].toUpperCase(), key=platzSchluessel(raw);
+                        var pos=platzZu(raw)||ctrlPosCache[a.callsign.toUpperCase()];
                         if(!pos) return;
+                        merkeName(key,raw);
                         if(!atisGroups[key]) atisGroups[key]={pos:pos,list:[]};
                         atisGroups[key].list.push(a);
                     });
 
                     controllers.forEach(function(c){
-                        if(c.facility===0) return;
                         var prefix=c.callsign.split('_')[0].toUpperCase();
-                        var pos=staticAirportPos[prefix]||staticAirportPos['K'+prefix]||staticAirportPos['P'+prefix]||staticAirportPos['C'+prefix]||null;
-                        if(!pos)(data.airports||[]).forEach(function(a){if(!pos&&(a.icao===prefix||a.icao==='K'+prefix)){var alat=parseFloat(a.latitude||a.lat),alon=parseFloat(a.longitude||a.lon);if(!isNaN(alat)&&!isNaN(alon))pos=[alat,alon];}});
-                        if(!pos) pos=ctrlPosCache[c.callsign.toUpperCase()];
+                        // Beobachter nur, wenn er auf Sprechfrequenz an einem echten Platz sitzt (ADD_OBS 122.575).
+                        if(c.facility===0&&!(window.LM3.aufSprechfrequenz(c.frequency)&&platzZu(prefix))) return;
+                        var pos=platzZu(prefix)||ctrlPosCache[c.callsign.toUpperCase()];
                         /* CTR/FSS without position: keep for FIR sector matching (polygon doesn't need pos) */
                         if(!pos&&(c.facility===6||c.facility===1)){centerList.push({ctrl:c,pos:null});return;}
                         if(!pos) return;
                         if(c.facility===6||c.facility===1){centerList.push({ctrl:c,pos:pos});}
                         else{
                             var raw=c.callsign.split('_')[0].toUpperCase();
-                            var isRealAirport=!!(staticAirportPos[raw]||staticAirportPos['K'+raw]||staticAirportPos['C'+raw]||staticAirportPos['P'+raw]);
-                            if(!isRealAirport){centerList.push({ctrl:c,pos:pos,isTracon:true});}
-                            else{var key=normalizeKey(raw);if(!airportGroups[key])airportGroups[key]={pos:pos,ctrls:[]};airportGroups[key].ctrls.push(c);}
+                            if(!platzZu(raw)){centerList.push({ctrl:c,pos:pos,isTracon:true});}
+                            else{var key=platzSchluessel(raw);merkeName(key,raw);if(!airportGroups[key])airportGroups[key]={pos:platzZu(raw),ctrls:[]};airportGroups[key].ctrls.push(c);}
                         }
                     });
 
@@ -1237,9 +1394,10 @@
                         if(bestKey){if(!airportGroups[bestKey]){airportGroups[bestKey]={pos:(atisGroups[bestKey]||{}).pos||entry.pos,ctrls:[]};allAirportKeys[bestKey]=true;}airportGroups[bestKey].ctrls.push(entry.ctrl);traconMerged[idx]=true;}
                     });
 
-                    Object.keys(allAirportKeys).forEach(function(icao){
-                        var group=airportGroups[icao]||{pos:atisGroups[icao].pos,ctrls:[]};
-                        var atisList=atisGroups[icao]?atisGroups[icao].list:[];
+                    Object.keys(allAirportKeys).forEach(function(key){
+                        var icao=anzeige[key]||key;
+                        var group=airportGroups[key]||{pos:atisGroups[key].pos,ctrls:[]};
+                        var atisList=atisGroups[key]?atisGroups[key].list:[];
                         ctrlDone+=group.ctrls.length+atisList.length;
                         L.marker(group.pos,{icon:buildAirportCtrlIcon(icao,group.ctrls,atisList),title:icao,zIndexOffset:500}).bindPopup(buildAirportCtrlPopup(icao,group.ctrls,atisList),{maxWidth:300}).addTo(vatsimCtrlLayer);
                     });
@@ -1252,25 +1410,27 @@
                         var color=entry.isTracon?'#27ae60':isUpper?'#8e44ad':c.facility===6?'#1abc9c':'#8e44ad';
                         ctrlDone++;
                         if(entry.isTracon){
-                            var traconIcon=L.divIcon({html:'<div style="display:flex;flex-direction:column;align-items:center;white-space:nowrap;pointer-events:auto"><div style="background:'+color+';color:#fff;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700;letter-spacing:.5px;box-shadow:0 1px 4px rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.5);line-height:1.4">'+h(root)+'</div><div style="width:4px;height:4px;border-radius:50%;background:'+color+';margin-top:2px"></div></div>',className:'',iconSize:[root.length*8+16,26],iconAnchor:[(root.length*8+16)/2,13]});
+                            var traconIcon=L.divIcon({html:'<div style="display:flex;flex-direction:column;align-items:center;white-space:nowrap;pointer-events:auto"><div style="background:'+color+';color:#fff;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700;letter-spacing:.5px;box-shadow:0 1px 4px rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.5);line-height:1.4">'+h(root)+'</div><div style="width:4px;height:4px;border-radius:50%;background:'+color+';margin-top:2px"></div></div>',className:'lm3-tracon',iconSize:[root.length*8+16,26],iconAnchor:[(root.length*8+16)/2,13]});
                             L.marker(entry.pos,{icon:traconIcon,title:c.callsign,zIndexOffset:400}).bindPopup('<div class="vatsim-popup"><div class="vatsim-popup-header"><div class="vatsim-popup-callsign">'+h(c.callsign||'—')+'</div><div class="vatsim-popup-route">TRACON / Approach Control</div></div><div class="vatsim-popup-body">'+vRow('Frequency',safeFreq(c.frequency||'') || '—')+ctrlInfoLine(c)+'</div></div>',{maxWidth:260}).addTo(vatsimCtrlLayer);
                         } else {
                             var mapKey=parts.length>=3?root+'_'+parts[1].toUpperCase():root;
-                            if(!activeFirMap[mapKey])activeFirMap[mapKey]={callsign:c.callsign,frequency:c.frequency,name:c.name,cid:c.cid,rating:c.rating,logon_time:c.logon_time,visual_range:c.visual_range,color:color,isUpper:isUpper,root:root,network:'VATSIM'};
+                            var g=window.LM3.grenzenFuerLotse(c.callsign,vatspyFir.firNachWort,vatspyFir.uirNachWort);
+                            if(!activeFirMap[mapKey])activeFirMap[mapKey]={callsign:c.callsign,frequency:c.frequency,name:c.name,cid:c.cid,rating:c.rating,logon_time:c.logon_time,visual_range:c.visual_range,color:g.uir?'#8e44ad':color,isUpper:isUpper||g.uir,root:root,network:'VATSIM',kennungen:g.kennungen,firName:g.name};
                         }
                     });
 
-                    vatsimSectorLayer.clearLayers();
-                    var boundsPromise=firBoundsGeoJson?Promise.resolve():fetch(VATSPY_BOUNDS_API).then(function(r){return r.json();}).then(function(gj){firBoundsGeoJson=gj;});
-                    Promise.all([boundsPromise,loadFirNames()]).then(function(){if(firBoundsGeoJson)renderActiveSectors(activeFirMap);}).catch(function(e){console.warn('[VATSIM] Sektoren-Fehler:',e);});
+                    // Kein Leeren hier: renderActiveSectors leert selbst, erst wenn die Grenzen da sind.
+                    // Schlaegt der Abruf fehl, bleibt der letzte Stand stehen; der naechste Takt holt neu.
+                    Promise.all([ladeGrenzen(),loadFirNames()]).then(function(){if(firBoundsGeoJson)renderActiveSectors(activeFirMap);}).catch(function(e){console.warn('[VATSIM] Sektoren-Fehler:',e);});
 
                     if(typeof applyLayerVisibility==='function') applyLayerVisibility();
                     var statsEl=document.getElementById('vatsimStats'), dotEl=document.getElementById('vatsimNetDot');
                     if(statsEl) statsEl.textContent='\u2708'+pilots.length+'  \uD83C\uDFA7'+ctrlDone;
-                    if(dotEl)   dotEl.classList.add('live');
+                    if(dotEl)   { dotEl.classList.add('live'); dotEl.classList.remove('fehler'); }
                     return true;
                 }).catch(function(err){
                     console.error('[VATSIM] Fehler:',err);
+                    var dv=document.getElementById('vatsimNetDot'); if(dv){ dv.classList.remove('live'); dv.classList.add('fehler'); }
                     return false;
                 }).finally(function() {
                     vatsimFetchInFlight = false;
@@ -1280,14 +1440,16 @@
             function loadIvao(map) {
                 if (ivaoFetchInFlight) return Promise.resolve(false);
                 ivaoFetchInFlight = true;
-                return fetch(IVAO_DATA_API).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}).then(function(data){
+                // VATSpy auch hier: Plaetze und FIR-Zuordnung gelten fuer IVAO genauso.
+                return Promise.all([holeMitFrist(IVAO_DATA_API, 20000, 'json'),loadFirNames()]).then(function(res){
+                    var data=res[0];
                     var clients=data.clients||{}, pilots=clients.pilots||[], atcs=clients.atcs||[];
                     var statsEl=document.getElementById('ivaoStats'), dotEl=document.getElementById('ivaoNetDot');
                     if(statsEl) statsEl.textContent='\u2708'+pilots.length+'  \uD83C\uDFA7'+atcs.length;
-                    if(dotEl)   dotEl.style.background='#fff';
+                    if(dotEl)   { dotEl.classList.add('live'); dotEl.classList.remove('fehler'); }
                     if(!showIvao) return true;
 
-                    ivaoPilotsLayer.clearLayers(); ivaoCtrlLayer.clearLayers(); ivaoSectorLayer.clearLayers();
+                    ivaoPilotsLayer.clearLayers(); ivaoCtrlLayer.clearLayers();
                     var IVAO_FAC={'DEL':2,'GND':3,'TWR':4,'APP':5,'DEP':5,'CTR':6,'FSS':1};
 
                     pilots.forEach(function(p){
@@ -1308,27 +1470,32 @@
                         if(facility===0) return;
                         var atisLines=(c.atis&&Array.isArray(c.atis.lines))?c.atis.lines:[];
                         if(facility===6||facility===1){
-                            var root=cs.split('_')[0].toUpperCase(), isUpper=!!UPPER_FIR[root];
-                            if(!ivaoFirMap[root]){var _vid=c.userId||''; ivaoFirMap[root]={callsign:cs,frequency:freq,color:isUpper?'#8e44ad':'#16a085',isUpper:isUpper,root:root,network:'IVAO',cid:_vid,cid_link:_vid?'https://tracker.ivao.aero/atc/'+_vid:'',rating:c.rating||0,logon_time:c.createdAt||''}; }
+                            var csTeile=cs.split('_'), root=csTeile[0].toUpperCase(), isUpper=!!UPPER_FIR[root];
+                            // Teilsektoren getrennt (LON_N_CTR / LON_S_CTR), wie bei VATSIM
+                            var ivaoKey=csTeile.length>=3?root+'_'+csTeile[1].toUpperCase():root;
+                            if(!ivaoFirMap[ivaoKey]){var _vid=c.userId||'', g=window.LM3.grenzenFuerLotse(cs,vatspyFir.firNachWort,vatspyFir.uirNachWort); ivaoFirMap[ivaoKey]={callsign:cs,frequency:freq,color:(isUpper||g.uir)?'#8e44ad':'#16a085',isUpper:isUpper||g.uir,root:root,network:'IVAO',cid:_vid,cid_link:_vid?'https://tracker.ivao.aero/atc/'+_vid:'',rating:c.rating||0,logon_time:c.createdAt||'',kennungen:g.kennungen,firName:g.name}; }
                         } else if(!isNaN(lat)&&!isNaN(lon)){
-                            var icaoRaw=cs.split('_')[0].toUpperCase();
-                            if(!ivaoAirportGroups[icaoRaw])ivaoAirportGroups[icaoRaw]={pos:[lat,lon],ctrls:[],atis:[]};
-                            var ivaoVid=c.userId||''; ivaoAirportGroups[icaoRaw].ctrls.push({callsign:cs,facility:facility,frequency:freq,name:'',cid:ivaoVid,cid_link:'https://tracker.ivao.aero/atc/'+ivaoVid,rating:c.rating||0,logon_time:c.createdAt||'',network:'IVAO'});
-                            if(atisLines.length)ivaoAirportGroups[icaoRaw].atis.push({callsign:cs,frequency:freq,text_atis:atisLines});
+                            // nach aufgeloester Stelle wie bei VATSIM (CLT_GND + KCLT_TWR = ein Kasten)
+                            var icaoRaw=cs.split('_')[0].toUpperCase(), ivaoPlatz=platzSchluessel(icaoRaw);
+                            if(!ivaoAirportGroups[ivaoPlatz])ivaoAirportGroups[ivaoPlatz]={pos:platzZu(icaoRaw)||[lat,lon],ctrls:[],atis:[],name:icaoRaw};
+                            if(icaoRaw.length>ivaoAirportGroups[ivaoPlatz].name.length)ivaoAirportGroups[ivaoPlatz].name=icaoRaw;
+                            var ivaoVid=c.userId||''; ivaoAirportGroups[ivaoPlatz].ctrls.push({callsign:cs,facility:facility,frequency:freq,name:'',cid:ivaoVid,cid_link:'https://tracker.ivao.aero/atc/'+ivaoVid,rating:c.rating||0,logon_time:c.createdAt||'',network:'IVAO'});
+                            if(atisLines.length)ivaoAirportGroups[ivaoPlatz].atis.push({callsign:cs,frequency:freq,text_atis:atisLines});
                         }
                     });
 
-                    Object.keys(ivaoAirportGroups).forEach(function(icao){
-                        var group=ivaoAirportGroups[icao];
-                        var pos=staticAirportPos[icao]||group.pos;
+                    Object.keys(ivaoAirportGroups).forEach(function(key){
+                        var group=ivaoAirportGroups[key], icao=group.name, pos=group.pos;
                         L.marker(pos,{icon:buildAirportCtrlIconIvao(icao,group.ctrls,group.atis),title:icao,zIndexOffset:490}).bindPopup(buildAirportCtrlPopupIvao(icao,group.ctrls,group.atis),{maxWidth:300}).addTo(ivaoCtrlLayer);
                     });
 
-                    if(vatsimShowSectors) renderActiveSectors(ivaoFirMap, ivaoSectorLayer);
+                    letzteIvaoFirMap=ivaoFirMap;
+                    if(vatsimShowSectors) ladeGrenzen().then(function(){renderActiveSectors(ivaoFirMap, ivaoSectorLayer);}).catch(function(e){console.warn('[IVAO] Sektoren-Fehler:',e);});
                     if(typeof applyLayerVisibility==='function') applyLayerVisibility();
                     return true;
                 }).catch(function(err){
                     console.error('[IVAO] Error:',err);
+                    var di=document.getElementById('ivaoNetDot'); if(di){ di.classList.remove('live'); di.classList.add('fehler'); }
                     return false;
                 }).finally(function() {
                     ivaoFetchInFlight = false;
@@ -1348,6 +1515,8 @@
                     folgen: 'Folgen', folgt: 'Folgt', frei: 'Frei', alle: 'Alle Phasen', zuletzt: 'vor',
                     schliessen: 'Schließen', stand: 'Stand', offline: 'offline', abflug: 'Abflug',
                     pilot: 'Pilot', veraltet: 'Angezeigt wird der letzte bekannte Stand.', nochmal: 'Erneut versuchen',
+                    flugzeug: 'Flugzeug', hoehe: 'Höhe', kurs: 'Kurs', fortschritt: 'Fortschritt', mehr: 'Mehr Werte',
+                    weitereFluege: 'weitere Flüge hier – Klick zoomt hinein',
                     fehler: {
                         phpvms: 'Die laufenden Flüge konnten nicht gelesen werden.',
                         kein_schluessel: 'Für AeroACARS Live ist kein Lese-Schlüssel hinterlegt.',
@@ -1364,6 +1533,8 @@
                     folgen: 'Follow', folgt: 'Following', frei: 'Free', alle: 'All phases', zuletzt: 'ago',
                     schliessen: 'Close', stand: 'Stand', offline: 'offline', abflug: 'Departure',
                     pilot: 'Pilot', veraltet: 'Showing the last known state.', nochmal: 'Try again',
+                    flugzeug: 'Aircraft', hoehe: 'Altitude', kurs: 'Heading', fortschritt: 'Progress', mehr: 'More values',
+                    weitereFluege: 'more flights here – click to zoom in',
                     fehler: {
                         phpvms: 'Running flights could not be read.',
                         kein_schluessel: 'No read key is stored for AeroACARS Live.',
@@ -1388,15 +1559,40 @@
                 return teile[0] + ' ' + teile[teile.length - 1].charAt(0).toUpperCase() + '.';
             }
 
-            var LM_FLIEGER_SVG = '<svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true">' +
-                '<path d="M16 2.5c1.1 0 1.9 1.3 1.9 3.2v7.1l10.6 6.2v2.6l-10.6-3.1v6.4l3.1 2.4v2.1L16 27.9l-5 1.5v-2.1l3.1-2.4v-6.4L3.5 21.6V19l10.6-6.2V5.7c0-1.9.8-3.2 1.9-3.2z"/></svg>';
+            // Silhouetten der sieben Flugzeugklassen (Entwurf 03.11.2026), einmal
+            // als Sprite in die Seite; die Marker verweisen mit <use> darauf.
+            var LM_SYMBOLE =
+                '<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>' +
+                '<g id="lm-k1"><path d="M30.6 8h2.8l1 10H60v6H34.4l-1.4 22h9v4.5h-9.6l-.6 3.5h-1.6l-.6-3.5H22v-4.5h9l-1.4-22H4v-6h25.6z"/><rect x="24" y="5.2" width="16" height="1.8" rx=".9"/></g>' +
+                '<g id="lm-k2"><path d="M32 4c1.6 0 2.5 2 2.5 5v13H61v4l-26.5 2v24l8 2.5v3L32 56.5l-10.5 1V54.5l8-2.5V28L3 26v-4h26.5V9c0-3 .9-5 2.5-5z"/><rect x="17.5" y="15" width="4.6" height="16" rx="2.3"/><rect x="41.9" y="15" width="4.6" height="16" rx="2.3"/><rect x="14.5" y="13.4" width="10.6" height="1.6" rx=".8"/><rect x="38.9" y="13.4" width="10.6" height="1.6" rx=".8"/></g>' +
+                '<g id="lm-k3"><path d="M32 6c1.5 0 2.4 2.4 2.4 5.5V26L54 36v3l-19.6-5v14l7.6 5v2.6L32 53.5l-10 2.1V53l7.6-5V34L10 39v-3l19.6-10V11.5C29.6 8.4 30.5 6 32 6z"/><rect x="24.6" y="38" width="3.6" height="9" rx="1.8"/><rect x="35.8" y="38" width="3.6" height="9" rx="1.8"/></g>' +
+                '<g id="lm-k4"><path d="M32 3.5c1.9 0 3.2 2.6 3.2 6.2V22l21.6 11.6c.9.5 1.4 1.4 1.4 2.4v2.2L35.2 31.6v12.6l7.4 5.6c.5.4.8 1 .8 1.6v1.8L32 50.6l-11.4 2.6v-1.8c0-.6.3-1.2.8-1.6l7.4-5.6V31.6L5.8 38.2V36c0-1 .5-1.9 1.4-2.4L28.8 22V9.7c0-3.6 1.3-6.2 3.2-6.2z"/><rect x="40.5" y="25.5" width="3.2" height="6.5" rx="1.6"/><rect x="20.3" y="25.5" width="3.2" height="6.5" rx="1.6"/></g>' +
+                '<g id="lm-k5"><path d="M32 2c2.3 0 3.6 3 3.6 7v12l23.4 12.6c.8.4 1 1 1 1.8V38L35.6 31v13.4l8 6c.4.3.6.8.6 1.3v2L32 51.6l-12.2 2.1v-2c0-.5.2-1 .6-1.3l8-6V31L4 38v-2.6c0-.8.2-1.4 1-1.8L28.4 21V9c0-4 1.3-7 3.6-7z"/><rect x="40.2" y="23.6" width="4.6" height="9.5" rx="2.3"/><rect x="19.2" y="23.6" width="4.6" height="9.5" rx="2.3"/></g>' +
+                '<g id="lm-k6"><path d="M32 2c2.5 0 3.8 3 3.8 7.4v11.4L60 33.6c.6.3 1 1 1 1.7V38L35.8 31v13.4l8 6c.4.3.6.8.6 1.3v2L32 51.6l-12.4 2.1v-2c0-.5.2-1 .6-1.3l8-6V31L3 38v-2.7c0-.7.4-1.4 1-1.7l24.2-12.8V9.4c0-4.4 1.3-7.4 3.8-7.4z"/><rect x="38.4" y="23" width="3.8" height="8" rx="1.9"/><rect x="46.6" y="27.4" width="3.8" height="8" rx="1.9"/><rect x="21.8" y="23" width="3.8" height="8" rx="1.9"/><rect x="13.6" y="27.4" width="3.8" height="8" rx="1.9"/></g>' +
+                '<g id="lm-k7"><circle cx="32" cy="26" r="21" fill="none" stroke-width="1.6" opacity=".55"/><ellipse cx="32" cy="26" rx="6.5" ry="10"/><rect x="30.8" y="34" width="2.4" height="20" rx="1.2"/><rect x="26" y="52" width="12" height="2.2" rx="1.1"/></g>' +
+                '</defs></svg>';
+
+            // Ein Symbol als SVG-Text: Klasse → Silhouette, Groesse in px, Kontur
+            // in Bildschirm-Pixeln gleich dick, egal wie gross das Symbol ist.
+            function symbolSvg(info, px, kontur) {
+                return '<svg viewBox="0 0 64 64" width="' + px + '" height="' + px + '" style="stroke-width:' +
+                    (kontur * 64 / px).toFixed(2) + '"><use href="#lm-' + info.symbol + '"/></svg>';
+            }
 
             function starteVaFluege(map) {
                 var cfg = window.LIVE_MAP_UI || {};
                 var zustand = {
-                    fluege: [], geplant: [], auswahl: null, phase: 'ALL', tab: 'aktiv',
-                    folgen: !!cfg.defaultFollowFlight, ersteAnsicht: true, fehler: null, geladen: false
+                    fluege: [], geplant: [], flughaefen: {}, auswahl: null, phase: 'ALL', tab: 'aktiv',
+                    folgen: !!cfg.defaultFollowFlight, ersteAnsicht: true, fehler: null, geladen: false,
+                    sort: { aktiv: { k: 'phase', r: 'auf' }, geplant: { k: 'zeit', r: 'auf' } }
                 };
+                // Sortierwahl je Reiter, gilt oben und unten; im Browser gemerkt
+                try {
+                    var gemerkt = JSON.parse(localStorage.getItem('livemap_sort') || 'null');
+                    ['aktiv', 'geplant'].forEach(function (t) {
+                        if (gemerkt && gemerkt[t] && typeof gemerkt[t].k === 'string') zustand.sort[t] = { k: gemerkt[t].k, r: gemerkt[t].r === 'ab' ? 'ab' : 'auf' };
+                    });
+                } catch (e) {}
                 var marker = {};            // id → L.marker
                 var flugEbene = L.layerGroup().addTo(map);
                 var spurEbene = L.layerGroup().addTo(map);
@@ -1404,21 +1600,31 @@
                 var abrufLaeuft = false, abrufTimer = null, spurTimer = null;
 
                 var el = {
-                    wrap: document.getElementById('lm3'),
-                    panel: document.getElementById('lm3-panel'),
+                    wrap: document.getElementById('lm-root'),
+                    tafel: document.getElementById('va-flights-panel'),
+                    kopf: document.getElementById('lm3-tafel-kopf'),
+                    inhalt: document.getElementById('lm3-tafel-inhalt'),
                     liste: document.getElementById('lm3-liste'),
                     meldung: document.getElementById('lm3-meldung'),
                     zahl: document.getElementById('lm3-zahl'),
+                    zahlGeplant: document.getElementById('lm3-zahl-geplant'),
                     nAktiv: document.getElementById('lm3-n-aktiv'),
                     nGeplant: document.getElementById('lm3-n-geplant'),
                     tabAktiv: document.getElementById('lm3-tab-aktiv'),
                     tabGeplant: document.getElementById('lm3-tab-geplant'),
+                    kopfAktiv: document.getElementById('lm3-kopf-aktiv'),
+                    kopfGeplant: document.getElementById('lm3-kopf-geplant'),
                     phase: document.getElementById('lm3-phase'),
                     filterZeile: document.getElementById('lm3-filter'),
                     detail: document.getElementById('lm3-detail'),
+                    rechts: document.querySelector('#lm-root .lm3-rechts'),
                     punkt: document.getElementById('lm3-status-punkt'),
                     folgen: document.getElementById('btnFollowFlight')
                 };
+                if (el.wrap && !document.getElementById('lm-k1')) el.wrap.insertAdjacentHTML('afterbegin', LM_SYMBOLE);
+                function schmal() { return !!(el.wrap && el.wrap.classList.contains('lm3--schmal')); }
+                // Tafel unten (Verwaltung): feste Tabelle unter der Karte, immer offen.
+                var tafelUnten = !!(el.wrap && el.wrap.classList.contains('lm3--tafel-unten'));
 
                 // ── Phasenfilter: Reihenfolge wie die Webapp ──
                 if (el.phase) {
@@ -1435,6 +1641,8 @@
                     if (el.tabAktiv) el.tabAktiv.setAttribute('aria-selected', tab === 'aktiv' ? 'true' : 'false');
                     if (el.tabGeplant) el.tabGeplant.setAttribute('aria-selected', tab === 'geplant' ? 'true' : 'false');
                     if (el.filterZeile) el.filterZeile.hidden = tab !== 'aktiv';
+                    if (el.kopfAktiv) el.kopfAktiv.hidden = tab !== 'aktiv';
+                    if (el.kopfGeplant) el.kopfGeplant.hidden = tab !== 'geplant';
                     zeichneListe();
                 }
                 if (el.tabAktiv) el.tabAktiv.addEventListener('click', function () { setzeTab('aktiv'); });
@@ -1446,6 +1654,7 @@
                     return roh.map(function (b) {
                         return {
                             callsign: ((b.airline && b.airline.icao) || '') + (b.flight_number || ''),
+                            logo: b.airline && b.airline.logo ? b.airline.logo : null,
                             dep: (b.dpt_airport && (b.dpt_airport.icao || b.dpt_airport.id)) || b.dpt_airport_id || null,
                             arr: (b.arr_airport && (b.arr_airport.icao || b.arr_airport.id)) || b.arr_airport_id || null,
                             pilot: lmKurzname(b.user && b.user.name),
@@ -1469,7 +1678,9 @@
                                 if (!LM3.fehlerIstVoruebergehend(zustand.fehler)) zustand.fluege = [];
                             } else {
                                 zustand.fehler = null;
-                                zustand.fluege = LM3.sortiere(d.fluege);
+                                zustand.warnung = d.warnung || null;
+                                zustand.fluege = d.fluege;
+                                if (d.flughaefen && typeof d.flughaefen === 'object') zustand.flughaefen = d.flughaefen;
                             }
                         })
                         .catch(function () { zustand.geladen = true; zustand.fehler = 'netz'; })
@@ -1493,21 +1704,24 @@
                     return null;
                 }
                 function sichtbareFluege() { return LM3.filterNachPhase(zustand.fluege, zustand.phase); }
+                function weg(f) { return LM3.fortschritt(zustand.flughaefen[f.dep], zustand.flughaefen[f.arr], f.pos); }
 
                 // ── Zeichnen ──
                 function zeichneAlles() { zeichneKopf(); zeichneListe(); zeichneMarker(); zeichneDetail(); folge(); }
 
                 function zeichneKopf() {
                     var n = zustand.fluege.length;
-                    if (el.zahl) el.zahl.textContent = zustand.fehler ? '!' : String(n);
+                    if (el.zahl) el.zahl.textContent = zustand.fehler && !n ? '!' : String(n);
+                    if (el.zahlGeplant) el.zahlGeplant.textContent = String(zustand.geplant.length);
                     if (el.nAktiv) el.nAktiv.textContent = String(n);
                     if (el.nGeplant) el.nGeplant.textContent = String(zustand.geplant.length);
                     if (el.punkt) el.punkt.className = 'lm3-punkt ' + (zustand.fehler ? 'ist-fehler' : (n ? 'ist-live' : ''));
                     if (el.meldung) {
-                        if (zustand.fehler) {
+                        var code = zustand.fehler || zustand.warnung;
+                        if (code) {
                             el.meldung.hidden = false;
-                            el.meldung.textContent = (LM_T.fehler[zustand.fehler] || LM_T.fehler.netz) +
-                                (zustand.fluege.length ? ' ' + LM_T.veraltet : '');
+                            el.meldung.textContent = (LM_T.fehler[code] || LM_T.fehler.netz) +
+                                (zustand.fehler && zustand.fluege.length ? ' ' + LM_T.veraltet : '');
                             var nochmal = document.createElement('button');
                             nochmal.type = 'button';
                             nochmal.className = 'lm3-nochmal';
@@ -1527,65 +1741,97 @@
                     d.textContent = text;
                     return d;
                 }
+                // Logo aus den Flugdaten; fehlt es (z. B. Quelle „Beide“), das der
+                // phpVMS-Airline mit den Buchstaben des Rufzeichens (AIRLINE_LOGOS).
+                function logoFuer(f) {
+                    if (f.logo) return f.logo;
+                    var k = (LM3.rufzeichenSchluessel(f.callsign).match(/^[A-Z]{3}/) || [''])[0];
+                    return (k && typeof AIRLINE_LOGOS !== 'undefined' && AIRLINE_LOGOS) ? (AIRLINE_LOGOS[k] || null) : null;
+                }
+                // Ohne Logo (oder wenn es nicht laedt): Airline-Buchstaben aus dem Rufzeichen
+                function logoHtml(url, alt, cs) {
+                    var u = safeAssetUrl(url);
+                    var k = (LM3.rufzeichenSchluessel(cs).match(/^[A-Z]+/) || [''])[0].slice(0, 3);
+                    if (!u) return '<span class="lm3-logo ist-text">' + lmEsc(k) + '</span>';
+                    return '<span class="lm3-logo" data-k="' + lmEsc(k) + '"><img src="' + lmEsc(u) + '" alt="' + lmEsc(alt || '') + '" loading="lazy" onerror="var p=this.parentNode;p.classList.add(\'ist-text\');p.textContent=p.getAttribute(\'data-k\')||\'\';"></span>';
+                }
+
+                function markiereSort() {
+                    ['aktiv', 'geplant'].forEach(function (t) {
+                        var kopf = t === 'aktiv' ? el.kopfAktiv : el.kopfGeplant, s = zustand.sort[t];
+                        if (!kopf) return;
+                        [].forEach.call(kopf.querySelectorAll('[data-sort]'), function (k) {
+                            var an = k.getAttribute('data-sort') === s.k;
+                            k.classList.toggle('ist-sortiert', an);
+                            if (an) k.setAttribute('data-richtung', s.r); else k.removeAttribute('data-richtung');
+                            k.setAttribute('aria-pressed', an ? 'true' : 'false');
+                        });
+                    });
+                }
+                [el.kopfAktiv, el.kopfGeplant].forEach(function (kopf, i) {
+                    if (!kopf) return;
+                    var t = i ? 'geplant' : 'aktiv';
+                    kopf.addEventListener('click', function (ev) {
+                        var k = ev.target.closest && ev.target.closest('[data-sort]');
+                        if (!k) return;
+                        var s = zustand.sort[t], neu = k.getAttribute('data-sort');
+                        zustand.sort[t] = { k: neu, r: s.k === neu && s.r === 'auf' ? 'ab' : 'auf' };
+                        try { localStorage.setItem('livemap_sort', JSON.stringify(zustand.sort)); } catch (e) {}
+                        markiereSort();
+                        zeichneListe();
+                    });
+                });
 
                 function zeichneListe() {
                     if (!el.liste) return;
+                    var scroll = el.liste.scrollTop;
                     el.liste.textContent = '';
                     if (!zustand.geladen) { el.liste.appendChild(leer(LM_T.laden)); return; }
                     if (zustand.tab === 'geplant') {
                         if (!zustand.geplant.length) { el.liste.appendChild(leer(LM_T.keineGeplant)); return; }
-                        zustand.geplant.forEach(function (g) { el.liste.appendChild(zeileGeplant(g)); });
-                        return;
+                        LM3.sortiereNach(zustand.geplant, zustand.sort.geplant.k, zustand.sort.geplant.r, null)
+                            .forEach(function (g) { el.liste.appendChild(zeileGeplant(g)); });
+                    } else {
+                        if (zustand.fehler && !zustand.fluege.length) return;
+                        var liste = sichtbareFluege();
+                        if (!liste.length) { el.liste.appendChild(leer(zustand.fluege.length ? LM_T.keineFilter : LM_T.keine)); return; }
+                        LM3.sortiereNach(liste, zustand.sort.aktiv.k, zustand.sort.aktiv.r, weg)
+                            .forEach(function (f) { el.liste.appendChild(zeileAktiv(f)); });
                     }
-                    if (zustand.fehler && !zustand.fluege.length) return;
-                    var liste = sichtbareFluege();
-                    if (!liste.length) { el.liste.appendChild(leer(zustand.fluege.length ? LM_T.keineFilter : LM_T.keine)); return; }
-                    liste.forEach(function (f) { el.liste.appendChild(zeileAktiv(f)); });
+                    el.liste.scrollTop = scroll;
                 }
 
                 function zeileAktiv(f) {
                     var pos = f.pos || {};
                     var phase = LM3.phaseForDisplay(f.phase, f.shadow_segment);
+                    var w = weg(f);
                     var b = document.createElement('button');
                     b.type = 'button';
-                    b.className = 'lm3-zeile' + (zustand.auswahl === f.id ? ' ist-gewaehlt' : '') + (f.status === 'offline' ? ' ist-offline' : '');
+                    b.className = 'lm3-zeile lm3-g-akt' + (zustand.auswahl === f.id ? ' ist-gewaehlt' : '') + (f.status === 'offline' ? ' ist-offline' : '');
                     b.setAttribute('role', 'listitem');
                     b.style.setProperty('--ph', LM3.phaseColor(phase));
-                    var flugzeug = [f.aircraft_icao, f.registration].filter(Boolean).join(' · ') || '—';
-                    var fuel = LM3.tonnen(pos.fuel_total_kg);
-                    var ap = LM3.apFlags(pos);
                     b.innerHTML =
-                        '<span class="lm3-z1"><strong class="lm3-cs">' + lmEsc(f.callsign || (LM_T.pilot + ' ' + f.pilot)) + '</strong>' +
-                        '<span class="lm3-pille">' + lmEsc(LM3.phaseLabel(phase)) + '</span>' +
-                        '<span class="lm3-alter" title="Last">' + (f.last_seen ? lmEsc(LM3.ageString(f.last_seen)) : '—') + '</span></span>' +
-                        '<span class="lm3-z2">' + lmEsc(f.dep || '?') + ' <span class="lm3-pfeil">→</span> ' + lmEsc(f.arr || '?') +
-                        '<span class="lm3-trenner">·</span>' + lmEsc(flugzeug) + '</span>' +
-                        '<span class="lm3-z3">' + lmEsc(f.pilot_name || (f.va + '/' + f.pilot)) +
-                        (f.status === 'offline' ? ' <em class="lm3-off">' + lmEsc(LM_T.offline) + '</em>' : '') + '</span>' +
-                        '<span class="lm3-werte">' +
-                        wert('ALT', pos.alt_ft != null ? LM3.zahl(pos.alt_ft, LM_SPRACHE) : '—') +
-                        wert('IAS', pos.ias_kt != null ? Math.round(pos.ias_kt) : '—') +
-                        wert('GS', pos.gs_kt != null ? Math.round(pos.gs_kt) : '—') +
-                        wert('V/S', LM3.vsText(pos.vs_fpm), pos.vs_fpm != null && Math.abs(pos.vs_fpm) > 2000) +
-                        wert('HDG', pos.hdg_true != null ? Math.round(pos.hdg_true) + '°' : '—') +
-                        wert('Fuel', fuel != null ? fuel + 't' : '—') +
-                        wert('AP', ap || '—', false, 'lm3-wert-ap') +
-                        '</span>';
+                        '<span class="lm3-flug">' + logoHtml(logoFuer(f), '', f.callsign) + '<b>' + lmEsc(f.callsign || (LM_T.pilot + ' ' + f.pilot)) + '</b></span>' +
+                        '<span>' + lmEsc(f.dep || '?') + ' <span class="lm3-pfeil">›</span> ' + lmEsc(f.arr || '?') + '</span>' +
+                        '<span class="lm3-sp-alt">' + lmEsc(LM3.hoeheText(pos.alt_ft, LM_SPRACHE)) + '</span>' +
+                        '<span class="lm3-sp-gs">' + (pos.gs_kt != null ? Math.round(pos.gs_kt) : '') + '</span>' +
+                        // Rest-Strecke und Fortschritt (Balken = geflogener Anteil)
+                        '<span class="lm3-sp-dist">' + (w ? '<span class="lm3-rest">' + Math.round(w.rest) + ' nm</span>' +
+                            '<i class="lm3-fort" aria-hidden="true"><i style="width:' + Math.round(w.anteil * 100) + '%"></i></i>' : '') + '</span>' +
+                        '<span class="lm3-sp-phase"><span class="lm3-pille">' + lmEsc(LM3.phaseLabel(phase)) + '</span></span>' +
+                        '<span class="lm3-sp-pilot">' + lmEsc(f.pilot_name || '') + '</span>';
                     b.addEventListener('click', function () { waehle(f.id, true); });
                     return b;
                 }
-                function wert(name, w, warn, extra) {
-                    return '<span class="lm3-wert' + (warn ? ' ist-warn' : '') + (extra ? ' ' + extra : '') + '"><span>' + lmEsc(name) + '</span><b>' + lmEsc(w) + '</b></span>';
-                }
                 function zeileGeplant(g) {
                     var d = document.createElement('div');
-                    d.className = 'lm3-zeile lm3-zeile-geplant';
+                    d.className = 'lm3-zeile lm3-g-plan';
                     d.setAttribute('role', 'listitem');
                     d.innerHTML =
-                        '<span class="lm3-z1"><strong class="lm3-cs">' + lmEsc(g.callsign || '—') + '</strong>' +
-                        (g.zeit ? '<span class="lm3-alter">' + lmEsc(g.zeit) + '</span>' : '') + '</span>' +
-                        '<span class="lm3-z2">' + lmEsc(g.dep || '?') + ' <span class="lm3-pfeil">→</span> ' + lmEsc(g.arr || '?') + '</span>' +
-                        '<span class="lm3-z3">' + lmEsc(g.pilot) + '</span>';
+                        '<span class="lm3-flug">' + logoHtml(logoFuer(g), '', g.callsign) + '<b>' + lmEsc(g.callsign || '—') + '</b></span>' +
+                        '<span>' + lmEsc(g.dep || '?') + ' <span class="lm3-pfeil">›</span> ' + lmEsc(g.arr || '?') + '</span>' +
+                        '<span class="lm3-sp-zeit">' + lmEsc(g.zeit || '') + '</span>' +
+                        '<span class="lm3-sp-pilot">' + lmEsc(g.pilot) + '</span>';
                     return d;
                 }
 
@@ -1601,12 +1847,19 @@
                 }
                 function icon(f, gewaehlt) {
                     var phase = LM3.phaseForDisplay(f.phase, f.shadow_segment);
+                    var info = LM3.klassenInfo(LM3.flugzeugKlasse(f.aircraft_icao));
+                    var px = Math.round(info.px * (LM3.amBoden(f.phase) ? 0.85 : 1));
                     var hdg = f.pos && f.pos.hdg_true != null ? Math.round(f.pos.hdg_true) : 0;
-                    var label = gewaehlt ? '<span class="lm3-mlabel">' + lmEsc(f.callsign || f.pilot) + '</span>' : '';
+                    var rahmen = px + 12;                 // Platz fuer den Ring
+                    var versatz = (rahmen - px) / 2;
+                    var mitLabel = gewaehlt || (cfg.rufzeichenZeigen !== false && map.getZoom() >= 6);
                     return L.divIcon({
                         className: 'lm3-marker' + (gewaehlt ? ' ist-gewaehlt' : '') + (f.status === 'offline' ? ' ist-offline' : ''),
-                        html: '<span class="lm3-flieger" style="--ph:' + LM3.phaseColor(phase) + ';transform:rotate(' + hdg + 'deg)">' + LM_FLIEGER_SVG + '</span>' + label,
-                        iconSize: [34, 34], iconAnchor: [17, 17]
+                        html: (gewaehlt ? '<span class="lm3-ring" style="left:0;top:0;width:' + rahmen + 'px;height:' + rahmen + 'px"></span>' : '') +
+                            '<span class="lm3-flieger" style="--ph:' + LM3.phaseColor(phase) + ';left:' + versatz + 'px;top:' + versatz + 'px;width:' + px + 'px;height:' + px + 'px;transform:rotate(' + hdg + 'deg)">' +
+                            symbolSvg(info, px, 1.3) + '</span>' +
+                            (mitLabel ? '<span class="lm3-mlabel" style="top:' + (rahmen + 1) + 'px">' + lmEsc(f.callsign || f.pilot) + '</span>' : ''),
+                        iconSize: [rahmen, rahmen], iconAnchor: [rahmen / 2, rahmen / 2]
                     });
                 }
                 function zeichneMarker() {
@@ -1626,22 +1879,30 @@
                             m.setLatLng(lage);
                             m.setIcon(icon(f, gew));
                         }
-                        m.setZIndexOffset(gew ? 1000 : 0);
+                        // VA-Flieger immer ueber Netz-Symbolen (Lotsen 400–500): sonst faengt die
+                        // Klickflaeche eines Platzsymbols den Klick auf das Flugzeug ab (gemessen
+                        // 03.11.2026: GSG101 unter LFJL, GSG220 unter EDDV).
+                        m.setZIndexOffset(gew ? 11000 : 10000);
                     });
                     Object.keys(marker).forEach(function (id) {
                         if (!sichtbar[id]) { flugEbene.removeLayer(marker[id]); delete marker[id]; }
                     });
+                    lmEntwirrenPlanen();
                 }
 
                 // ── Auswahl, Spur, Route ──
                 function waehle(id, ausListe) {
                     zustand.auswahl = id;
                     var f = findeFlug(id);
-                    if (el.wrap) el.wrap.classList.add('hat-detail');
                     spurDaten = { id: id, spur: [], route: [] };
                     spurEbene.clearLayers();
                     if (typeof routeLineLayer !== 'undefined') routeLineLayer.clearLayers();
+                    // Schmal teilen sich Tafel und Detail das Blatt unten.
+                    if (schmal()) { setzeTafel(false); schliesseKaesten(); }
                     zeichneListe(); zeichneMarker(); zeichneDetail();
+                    // Breit: neuer Flug zeigt das ganze Detail; passt ein offener Kasten
+                    // nicht mehr daneben, geht der Kasten zu (nichts abgeschnitten).
+                    if (!schmal() && el.detail) { el.detail.classList.remove('ist-klein'); if (!rechtsPasst()) schliesseKaesten(); }
                     if (f && f.pos) {
                         // Aus der Weltansicht heranholen, damit Spur und Lage lesbar sind.
                         if (map.getZoom() < 5) map.setView(lageFuer(f), 5, { animate: false });
@@ -1650,7 +1911,6 @@
                     holeSpur(id);
                     if (spurTimer) clearInterval(spurTimer);
                     spurTimer = setInterval(function () { if (!document.hidden) holeSpur(id); }, 30000);
-                    if (ausListe && el.wrap && el.wrap.classList.contains('lm3--schmal')) setzePanel(false);
                 }
                 function schliesseDetail() {
                     zustand.auswahl = null;
@@ -1658,7 +1918,6 @@
                     spurEbene.clearLayers();
                     if (typeof routeLineLayer !== 'undefined') routeLineLayer.clearLayers();
                     if (spurTimer) { clearInterval(spurTimer); spurTimer = null; }
-                    if (el.wrap) el.wrap.classList.remove('hat-detail');
                     zeichneListe(); zeichneMarker(); zeichneDetail();
                 }
                 window.vaInfoCardClose = schliesseDetail;
@@ -1709,77 +1968,95 @@
                     zeichneMarker();
                 }
 
-                // ── Flugdetail (Felder wie PilotDetail der Webapp) ──
+                // ── Detailkasten (Aufbau wie der 4.7.9-„Crew Pass“) ──
+                // Felder, die die Quelle nicht liefert, fehlen — keine Striche.
+                function zelle(name, wert, breit, extra) {
+                    if (wert == null || wert === '') return '';
+                    return '<div' + (breit ? ' class="lm3-d-breit"' : '') + '><dt>' + lmEsc(name) + '</dt><dd>' + lmEsc(wert) + '</dd>' + (extra || '') + '</div>';
+                }
                 function zeichneDetail() {
                     if (!el.detail) return;
                     var f = zustand.auswahl ? findeFlug(zustand.auswahl) : null;
                     if (!f) { el.detail.hidden = true; el.detail.innerHTML = ''; return; }
                     var pos = f.pos || {};
                     var phase = LM3.phaseForDisplay(f.phase, f.shadow_segment);
+                    var dep = zustand.flughaefen[f.dep] || {}, arr = zustand.flughaefen[f.arr] || {};
+                    var w = weg(f);
+                    var flugzeug = [f.aircraft_icao, f.registration].filter(Boolean).join(' · ');
                     var stand = '';
-                    if (f.dep_gate && f.arr_gate) stand = LM_T.stand + ' ' + f.dep_gate + ' → ' + f.arr_gate;
-                    else if (f.dep_gate) stand = LM_T.stand + ' ' + f.dep_gate;
-                    else if (f.arr_gate) stand = LM_T.stand + ' → ' + f.arr_gate;
-                    var meta = [f.aircraft_icao || f.registration || '—'];
-                    if (f.registration && f.aircraft_icao) meta.push(f.registration);
-                    if (f.sim) meta.push(LM3.formatSimLabel(f.sim));
-                    meta.push('ACARS: ' + (f.acars || 'AeroACARS'));
-                    var warn = '';
-                    if (pos.stall_warning) warn += '<span class="lm3-flag">⚠ STALL</span>';
-                    if (pos.overspeed_warning) warn += '<span class="lm3-flag">⚠ OVERSPEED</span>';
-                    var kv = [];
-                    kv.push(['HDG', pos.hdg_true != null ? Math.round(pos.hdg_true) + '° T' : '—']);
-                    if (pos.agl_ft != null && pos.agl_ft < 5000) kv.push(['AGL', LM3.zahl(pos.agl_ft, LM_SPRACHE) + ' ft']);
-                    if (pos.mach != null && pos.mach > 0.4) kv.push(['Mach', Number(pos.mach).toFixed(3)]);
-                    kv.push(['Wind', pos.wind_dir_deg != null ? Math.round(pos.wind_dir_deg) + '° / ' + Math.round(pos.wind_speed_kt || 0) + ' kt' : '—']);
-                    kv.push(['QNH', pos.qnh_hpa != null ? LM3.fmtQnhBoth(pos.qnh_hpa) : '—', pos.qnh_hpa != null && pos.altimeter_hpa != null ? 'Set ' + LM3.fmtQnhBoth(pos.altimeter_hpa) : null]);
-                    kv.push(['OAT', pos.oat_c != null ? Math.round(pos.oat_c) + '°C' : '—']);
-                    kv.push(['Fuel', pos.fuel_total_kg != null ? LM3.tonnen(pos.fuel_total_kg) + ' t' + (pos.fuel_flow_kg_h ? ' · ' + LM3.tonnen(pos.fuel_flow_kg_h, 2) + ' t/h' : '') : '—']);
-                    kv.push(['TOW', pos.total_weight_kg != null ? LM3.tonnen(pos.total_weight_kg) + ' t' : '—']);
-                    var badge = function (text, an, unbekannt) {
-                        return '<span class="lm3-badge' + (an ? ' ist-an' : '') + (unbekannt ? ' ist-unbekannt' : '') + '">' + lmEsc(text) + '</span>';
-                    };
-                    var flaps = Math.round((pos.flaps_position || 0) * 100);
-                    var config = badge('Gear DN', (pos.gear_position || 0) > 0.5) +
-                        badge('Flaps ' + flaps + '%', (pos.flaps_position || 0) > 0) +
-                        badge(pos.spoilers_armed == null ? 'SPL armed ?' : 'SPL armed', pos.spoilers_armed === true, f.pos != null && pos.spoilers_armed == null) +
-                        badge('Park brk', pos.parking_brake === true) +
-                        badge('ENG ' + (pos.engines_running || 0), (pos.engines_running || 0) > 0);
-                    var apZeile = (pos.ap_master || pos.ap_hdg || pos.ap_alt || pos.ap_nav || pos.ap_app)
-                        ? '<div class="lm3-badges">' + badge('AP', !!pos.ap_master) + badge('HDG', !!pos.ap_hdg) + badge('ALT', !!pos.ap_alt) + badge('NAV', !!pos.ap_nav) + badge('APP', !!pos.ap_app) + '</div>'
-                        : '';
-                    var kachel = function (name, w, einheit, warnTon) {
-                        return '<div class="lm3-kachel' + (warnTon ? ' ist-warn' : '') + '"><span>' + lmEsc(name) + '</span><b>' + lmEsc(w) + '</b><small>' + lmEsc(einheit) + '</small></div>';
-                    };
+                    if (f.dep_gate || f.arr_gate) stand = (f.dep_gate || '–') + ' → ' + (f.arr_gate || '–');
 
-                    // Scrollstand halten: das Detail wird bei jedem Abruf neu aufgebaut.
+                    var raster =
+                        zelle(LM_T.pilot, f.pilot_name) +
+                        zelle(LM_T.flugzeug, flugzeug) +
+                        zelle(LM_T.hoehe, pos.alt_ft != null ? LM3.zahl(pos.alt_ft, LM_SPRACHE) + ' ft' : null) +
+                        zelle('GS', pos.gs_kt != null ? Math.round(pos.gs_kt) + ' kt' : null) +
+                        zelle(LM_T.kurs, pos.hdg_true != null ? Math.round(pos.hdg_true) + '°' : null) +
+                        zelle('V/S', pos.vs_fpm != null ? LM3.vsText(pos.vs_fpm) + ' fpm' : null) +
+                        zelle(LM_T.stand, stand) +
+                        (w ? zelle(LM_T.fortschritt, Math.round(w.geflogen) + ' / ' + Math.round(w.gesamt) + ' nm', true,
+                            '<div class="lm3-balken"><i style="width:' + Math.round(w.anteil * 100) + '%"></i></div>') : '');
+
+                    // Mehr Werte nur, wenn die Quelle sie liefert (AeroACARS).
+                    var mehr =
+                        zelle('IAS', pos.ias_kt != null ? Math.round(pos.ias_kt) + ' kt' : null) +
+                        zelle('Mach', pos.mach != null && pos.mach > 0.4 ? Number(pos.mach).toFixed(3) : null) +
+                        zelle('AGL', pos.agl_ft != null && pos.agl_ft < 5000 ? LM3.zahl(pos.agl_ft, LM_SPRACHE) + ' ft' : null) +
+                        zelle('Wind', pos.wind_dir_deg != null ? Math.round(pos.wind_dir_deg) + '° / ' + Math.round(pos.wind_speed_kt || 0) + ' kt' : null) +
+                        zelle('QNH', pos.qnh_hpa != null ? LM3.fmtQnhBoth(pos.qnh_hpa) : null, true) +
+                        zelle('OAT', pos.oat_c != null ? Math.round(pos.oat_c) + ' °C' : null) +
+                        zelle('Fuel', pos.fuel_total_kg != null ? LM3.tonnen(pos.fuel_total_kg) + ' t' : null) +
+                        zelle('TOW', pos.total_weight_kg != null ? LM3.tonnen(pos.total_weight_kg) + ' t' : null) +
+                        zelle('Sim', f.sim ? LM3.formatSimLabel(f.sim) : null) +
+                        zelle('ACARS', f.acars);
+                    var badge = function (text, an) { return '<span class="lm3-badge' + (an ? ' ist-an' : '') + '">' + lmEsc(text) + '</span>'; };
+                    var badges = '';
+                    if (pos.gear_position != null || pos.flaps_position != null) {
+                        badges = badge('Gear DN', (pos.gear_position || 0) > 0.5) +
+                            badge('Flaps ' + Math.round((pos.flaps_position || 0) * 100) + '%', (pos.flaps_position || 0) > 0) +
+                            (pos.spoilers_armed != null ? badge('SPL armed', pos.spoilers_armed === true) : '') +
+                            (pos.parking_brake != null ? badge('Park brk', pos.parking_brake === true) : '') +
+                            (pos.engines_running != null ? badge('ENG ' + pos.engines_running, pos.engines_running > 0) : '');
+                    }
+                    var ap = LM3.apFlags(pos);
+                    if (ap) badges += ap.split(' ').map(function (a) { return badge(a, true); }).join('');
+                    var warn = (pos.stall_warning ? '<span class="lm3-flag">⚠ STALL</span>' : '') + (pos.overspeed_warning ? '<span class="lm3-flag">⚠ OVERSPEED</span>' : '');
+                    var mehrOffen = !!(el.detail.querySelector('details') && el.detail.querySelector('details').open);
+
+                    var logoUrl = safeAssetUrl(logoFuer(f));
                     var scrollVorher = el.detail.hidden ? 0 : el.detail.scrollTop;
                     el.detail.style.setProperty('--ph', LM3.phaseColor(phase));
                     el.detail.innerHTML =
                         '<header class="lm3-d-kopf">' +
-                          '<div><div class="lm3-d-cs">' + lmEsc(f.callsign || (LM_T.pilot + ' ' + f.pilot)) + '</div>' +
-                          '<div class="lm3-d-route">' + lmEsc(f.dep || '?') + ' <span class="lm3-pfeil">→</span> ' + lmEsc(f.arr || '?') + '</div>' +
-                          (stand ? '<div class="lm3-d-stand">' + lmEsc(stand) + '</div>' : '') + '</div>' +
-                          '<div class="lm3-d-rechts"><span class="lm3-d-phase">' + lmEsc(LM3.phaseLabel(phase)) + '</span>' +
-                          '<button type="button" class="lm3-zu" data-lm3-zu aria-label="' + lmEsc(LM_T.schliessen) + '">×</button></div>' +
+                          (logoUrl ? '<span class="lm3-d-logo"><img src="' + lmEsc(logoUrl) + '" alt="" onerror="this.parentNode.remove()"></span>' : '') +
+                                '<button type="button" class="lm3-d-cs" data-lm3-auf>' + lmEsc(f.callsign || (LM_T.pilot + ' ' + f.pilot)) + '</button>' +
+                          '<button type="button" class="lm3-zu" data-lm3-zu aria-label="' + lmEsc(LM_T.schliessen) + '">✕</button>' +
                         '</header>' +
-                        '<div class="lm3-d-meta">' + lmEsc(meta.join(' · ')) + '<span class="lm3-d-pilot">' + lmEsc(f.pilot_name || (f.va + '/' + f.pilot)) + '</span>' +
-                          (f.status === 'offline' ? ' <em class="lm3-off">' + lmEsc(LM_T.offline) + '</em>' : '') + '</div>' +
-                        (warn ? '<div class="lm3-flags">' + warn + '</div>' : '') +
-                        '<div class="lm3-kacheln">' +
-                          kachel('ALT', pos.alt_ft != null ? LM3.zahl(pos.alt_ft, LM_SPRACHE) : '—', 'ft') +
-                          kachel('IAS', pos.ias_kt != null ? String(Math.round(pos.ias_kt)) : '—', 'kt') +
-                          kachel('GS', pos.gs_kt != null ? String(Math.round(pos.gs_kt)) : '—', 'kt') +
-                          kachel('V/S', pos.vs_fpm != null ? (pos.vs_fpm > 0 ? '+' : '') + Math.round(pos.vs_fpm) : '—', 'fpm', pos.vs_fpm != null && Math.abs(pos.vs_fpm) > 2000) +
-                        '</div>' +
-                        '<dl class="lm3-kv">' + kv.map(function (p) { return '<dt>' + lmEsc(p[0]) + '</dt><dd>' + lmEsc(p[1]) + (p[2] ? '<small>' + lmEsc(p[2]) + '</small>' : '') + '</dd>'; }).join('') + '</dl>' +
-                        '<div class="lm3-badges">' + config + '</div>' + apZeile +
-                        '<div class="lm3-d-fuss"><span>' + (f.last_seen ? lmEsc(LM_SPRACHE === 'de' ? 'vor ' + LM3.ageString(f.last_seen) : LM3.ageString(f.last_seen) + ' ago') : '') + '</span>' +
-                        '<button type="button" class="lm3-knopf" data-lm3-folgen>' + lmEsc(zustand.folgen ? LM_T.folgt : LM_T.folgen) + '</button></div>';
+                        '<div class="lm3-d-route">' +
+                          '<div class="lm3-d-ap"><div class="lm3-d-icao">' + lmEsc(f.dep || '?') + '</div>' + (dep.name ? '<div class="lm3-d-name">' + lmEsc(dep.name) + '</div>' : '') + '</div>' +
+                          '<div class="lm3-d-mitte">✈' + (w ? '<small>' + Math.round(w.rest) + ' nm</small>' : '') + '</div>' +
+                          '<div class="lm3-d-ap"><div class="lm3-d-icao">' + lmEsc(f.arr || '?') + '</div>' + (arr.name ? '<div class="lm3-d-name">' + lmEsc(arr.name) + '</div>' : '') + '</div>' +
+                        '</div>' + warn +
+                        '<dl class="lm3-d-raster">' + raster + '</dl>' +
+                        (mehr || badges ? '<details class="lm3-d-mehr"' + (mehrOffen ? ' open' : '') + '><summary>' + lmEsc(LM_T.mehr) + '</summary>' +
+                            (mehr ? '<dl class="lm3-d-raster">' + mehr + '</dl>' : '') + (badges ? '<div class="lm3-badges">' + badges + '</div>' : '') + '</details>' : '') +
+                        '<div class="lm3-d-fuss"><span class="lm3-pille">' + lmEsc(LM3.phaseLabel(phase)) + '</span>' +
+                          (f.status === 'offline' ? '<span>' + lmEsc(LM_T.offline) + '</span>' : (f.last_seen ? '<span>' + lmEsc(LM_SPRACHE === 'de' ? 'vor ' + LM3.ageString(f.last_seen) : LM3.ageString(f.last_seen) + ' ago') + '</span>' : '')) +
+                          '<span class="lm3-weit"></span>' +
+                          (safeUrl(f.pirep_url) ? '<a class="lm3-d-link" href="' + lmEsc(safeUrl(f.pirep_url)) + '">PIREP ↗</a>' : '') +
+                          '<button type="button" class="lm3-knopf' + (zustand.folgen ? ' active' : '') + '" data-lm3-folgen aria-pressed="' + (zustand.folgen ? 'true' : 'false') + '">' + lmEsc(zustand.folgen ? LM_T.folgt : LM_T.folgen) + '</button>' +
+                        '</div>';
                     el.detail.hidden = false;
                     el.detail.scrollTop = scrollVorher;
                     var zu = el.detail.querySelector('[data-lm3-zu]');
                     if (zu) zu.addEventListener('click', schliesseDetail);
+                    // Eingeklappt (Kasten daneben braucht den Platz): Rufzeichen klappt auf.
+                    var auf = el.detail.querySelector('[data-lm3-auf]');
+                    if (auf) auf.addEventListener('click', function () {
+                        if (!el.detail.classList.contains('ist-klein')) return;
+                        el.detail.classList.remove('ist-klein');
+                        schliesseKaesten();
+                    });
                     var fo = el.detail.querySelector('[data-lm3-folgen]');
                     if (fo) fo.addEventListener('click', function () { setzeFolgen(!zustand.folgen); });
                 }
@@ -1795,15 +2072,23 @@
                     if (!el.folgen) return;
                     el.folgen.classList.toggle('active', zustand.folgen);
                     el.folgen.setAttribute('aria-pressed', zustand.folgen ? 'true' : 'false');
-                    var s = el.folgen.querySelector('span');
-                    if (s) s.textContent = zustand.folgen ? LM_T.folgen : LM_T.frei;
                 }
                 if (el.folgen) el.folgen.addEventListener('click', function () { setzeFolgen(!zustand.folgen); });
                 syncFolgenKnopf();
                 // Wer die Karte selbst bewegt, uebernimmt — Folgen geht aus.
-                map.on('dragstart', function () { if (zustand.folgen) setzeFolgen(false); });
-                // Nach jedem Verschieben die Marker in die sichtbare Weltkopie holen.
-                map.on('moveend', function () { zeichneMarker(); });
+                // Auch Zoomen zaehlt (Rad, +/−, Doppelklick, Zwei-Finger, Tasten, "+n"),
+                // sonst holt der naechste Abruf die Ansicht zurueck.
+                function nutzerBewegt() { if (zustand.folgen) setzeFolgen(false); }
+                map.on('dragstart dblclick boxzoomstart lm3nutzerzoom', nutzerBewegt);
+                map.on('keydown', function (e) { if (/^(\+|-|=|_|Add|Subtract)$/.test(e.originalEvent && e.originalEvent.key || '')) nutzerBewegt(); });
+                (function (c) {
+                    c.addEventListener('wheel', nutzerBewegt, { passive: true });
+                    c.addEventListener('touchstart', function (e) { if (e.touches && e.touches.length > 1) nutzerBewegt(); }, { passive: true });
+                    c.querySelectorAll('.leaflet-control-zoom a').forEach(function (a) { a.addEventListener('click', nutzerBewegt); });
+                })(map.getContainer());
+                // Nach jedem Verschieben die Marker in die sichtbare Weltkopie holen,
+                // nach dem Zoomen Rufzeichen ein-/ausblenden (ab Zoom 6).
+                map.on('moveend zoomend', function () { zeichneMarker(); });
 
                 function folge(sofort) {
                     if (!zustand.folgen && !zustand.ersteAnsicht) return;
@@ -1822,21 +2107,27 @@
                     opt.animate = !sofort;
                     map.fitBounds(L.latLngBounds(punkte), opt);
                 }
-                // Platz, den Liste und Detail ueber der Karte belegen.
+                // Freie Kartenflaeche = alles ausser dem, was Tafel, rechte Spalte
+                // und Blatt gerade belegen (aus den echten Rechtecken gemessen).
                 function freiraum() {
-                    var links = 40, rechts = 40, oben = 60, unten = 40;
-                    if (el.wrap && !el.wrap.classList.contains('lm3--schmal')) {
-                        if (el.panel && !el.panel.classList.contains('ist-zu') && !el.panel.hidden) links = el.panel.offsetWidth + 40;
-                        if (el.detail && !el.detail.hidden) rechts = el.detail.offsetWidth + 40;
-                    } else if (el.detail && !el.detail.hidden) {
-                        unten = el.detail.offsetHeight + 30;
-                    } else if (el.panel && el.panel.classList.contains('ist-offen')) {
-                        unten = el.panel.offsetHeight + 30;
+                    var karte = map.getContainer().getBoundingClientRect();
+                    var links = 50, rechts = 30, oben = 30, unten = 30;
+                    var belegt = function (e) { return e && !e.hidden && e.offsetParent !== null ? e.getBoundingClientRect() : null; };
+                    if (!schmal()) {
+                        var t = tafelUnten ? null : belegt(el.tafel);
+                        if (t) oben = Math.max(oben, t.bottom - karte.top + 20);
+                        var r = belegt(el.detail) || null;
+                        [].forEach.call(el.wrap.querySelectorAll('.lm3-box'), function (b) { if (!b.hidden) r = r || b.getBoundingClientRect(); });
+                        if (r) rechts = Math.max(rechts, karte.right - r.left + 20);
+                    } else {
+                        var unterkante = karte.bottom;
+                        [el.detail, tafelUnten ? null : el.tafel].forEach(function (e) { var q = belegt(e); if (q) unterkante = Math.min(unterkante, q.top); });
+                        unten = Math.max(unten, karte.bottom - unterkante + 20);
+                        oben = 60;
                     }
                     return { paddingTopLeft: [links, oben], paddingBottomRight: [rechts, unten] };
                 }
-                // Punkt in die Mitte der FREIEN Kartenflaeche legen (nicht unter
-                // Liste, Detail oder das Blatt von unten).
+                // Punkt in die Mitte der FREIEN Kartenflaeche legen.
                 function zentriere(lage, animiert) {
                     var fr = freiraum(), groesse = map.getSize();
                     var ziel = L.point(
@@ -1849,34 +2140,55 @@
                 }
                 map.on('click', function () { if (zustand.auswahl) schliesseDetail(); });
 
-                // ── Panel auf/zu (schmal: unten als Blatt) ──
-                function setzePanel(offen) {
-                    if (!el.panel) return;
-                    el.panel.classList.toggle('ist-offen', !!offen);
-                    el.panel.classList.toggle('ist-zu', !offen);
-                    var knopf = document.getElementById('mob-toggle-panel');
-                    if (knopf) knopf.setAttribute('aria-pressed', offen ? 'true' : 'false');
-                    var zu = document.getElementById('lm3-panel-zu');
-                    if (zu) zu.setAttribute('aria-expanded', offen ? 'true' : 'false');
-                    // Das Blatt von unten verdeckt die Haelfte der Karte — neu einpassen.
-                    if (zustand.folgen && el.wrap && el.wrap.classList.contains('lm3--schmal')) setTimeout(function () { folge(true); }, 0);
+                // Passt alles in der rechten Spalte ohne Abschneiden? (volle Hoehen
+                // der sichtbaren Teile + Abstaende gegen die Spaltenhoehe)
+                function rechtsPasst() {
+                    var r = el.rechts;
+                    if (!r) return true;
+                    var summe = 0, n = 0;
+                    [].forEach.call(r.children, function (k) {
+                        if (k.hidden || k.offsetParent === null) return;
+                        summe += k.classList.contains('lm3-detail') && k.classList.contains('ist-klein') ? k.getBoundingClientRect().height : k.scrollHeight;
+                        n++;
+                    });
+                    return summe + Math.max(0, n - 1) * 8 <= r.clientHeight + 1;
                 }
-                var panelZu = document.getElementById('lm3-panel-zu');
-                if (panelZu) panelZu.addEventListener('click', function () { setzePanel(el.panel.classList.contains('ist-zu')); });
-                var mobKnopf = document.getElementById('mob-toggle-panel');
-                if (mobKnopf) mobKnopf.addEventListener('click', function () {
-                    var offen = !el.panel.classList.contains('ist-offen');
-                    if (offen && zustand.auswahl) schliesseDetail();
-                    setzePanel(offen);
+                // Kasten neben dem Detail: reicht die Hoehe nicht fuer beide, klappt das
+                // Detail auf seine Kopfzeile ein (Auswahl und Spur bleiben).
+                function passeRechts() {
+                    if (!el.detail || el.detail.hidden) return;
+                    el.detail.classList.remove('ist-klein');
+                    var kastenOffen = [].some.call(el.wrap.querySelectorAll('.lm3-box'), function (b) { return !b.hidden; });
+                    if (!schmal() && kastenOffen && !rechtsPasst()) el.detail.classList.add('ist-klein');
+                }
+
+                // ── Tafel auf/zu ──
+                function setzeTafel(offen) {
+                    if (!el.inhalt || !el.kopf) return;
+                    if (tafelUnten) { el.inhalt.hidden = false; return; }
+                    el.inhalt.hidden = !offen;
+                    el.kopf.setAttribute('aria-expanded', offen ? 'true' : 'false');
+                }
+                // Schmal teilen sich Kaesten, Tafel und Detail eine Spalte: es ist
+                // immer nur eines offen.
+                function schliesseKaesten() {
+                    [].forEach.call(el.wrap.querySelectorAll('.lm3-box'), function (b) { b.hidden = true; });
+                    [].forEach.call(el.wrap.querySelectorAll('.lm3-wz[aria-expanded]'), function (k) { k.setAttribute('aria-expanded', 'false'); });
+                }
+                if (el.kopf && !tafelUnten) el.kopf.addEventListener('click', function () {
+                    var offen = !!el.inhalt.hidden;
+                    if (offen && schmal()) { if (zustand.auswahl) schliesseDetail(); schliesseKaesten(); }
+                    setzeTafel(offen);
                 });
 
+                markiereSort();
                 setzeTab('aktiv');
                 zeichneKopf();
+                zeichneListe();
                 holeFluege().then(function () { planeAbruf(); });
 
-                return { setzePanel: setzePanel, zustand: zustand };
+                return { setzeTafel: setzeTafel, schliesseDetail: schliesseDetail, zustand: zustand, schmal: schmal, passeRechts: passeRechts };
             }
-
             // ════════════════════════════════════════════════════════════
             //  KARTE — eigener Leaflet-Aufbau statt `render_live_map`.
             //  Der Kern wuerde sonst selbst /api/acars abfragen und eigene
@@ -1896,24 +2208,247 @@
                 if(vatsimShowSectors&&showIvao){if(!map.hasLayer(ivaoSectorLayer))ivaoSectorLayer.addTo(map);}else map.removeLayer(ivaoSectorLayer);
             }
 
+            // ── Entwirren: nichts auf der Karte liegt uebereinander ──
+            // Rangfolge: VA-Symbol (+ Rufzeichen des gewaehlten Flugs) > Lotsenkasten/TRACON
+            // > VA-Rufzeichen > Sektor-Etikett > Netz-Flieger. Wer einen schon platzierten trifft, wird
+            // unsichtbar (visibility, nicht display: so bleibt er messbar und kommt beim
+            // Hineinzoomen wieder). Gleicher Flughafen in VATSIM und IVAO: nebeneinander.
+            var lmEntwirrenAngefordert = false;
+            function lmEntwirrenPlanen() {
+                if (lmEntwirrenAngefordert) return;
+                lmEntwirrenAngefordert = true;
+                requestAnimationFrame(function () { lmEntwirrenAngefordert = false; lmEntwirren(); });
+            }
+            function lmEntwirren() {
+                var map = lm3Karte;
+                if (!map) return;
+                var pane = map.getPane('markerPane');
+                if (!pane) return;
+                var icons = Array.prototype.slice.call(pane.children);
+
+                // 1. zuruecksetzen (nur schreiben)
+                pane.querySelectorAll('.lm3-verdeckt').forEach(function (el) { el.classList.remove('lm3-verdeckt'); });
+                pane.querySelectorAll('.lm3-mehr').forEach(function (el) { el.parentNode.removeChild(el); });
+                pane.querySelectorAll('.lm3-sektor-etikett > div').forEach(function (el) { el.style.transform = ''; });
+                var stationen = { vatsim: {}, ivao: {} };
+                icons.forEach(function (el) {
+                    var netz = el.classList.contains('vatsim-airport-marker') ? 'vatsim' : el.classList.contains('ivao-airport-marker') ? 'ivao' : null;
+                    if (!netz) return;
+                    var innen = el.firstElementChild;
+                    if (innen) innen.style.marginLeft = '';
+                    var icao = el.getAttribute('title');
+                    if (icao) stationen[netz][icao] = el;
+                });
+                // 2. Paare nebeneinander (Breiten aus dem Stil, kein Layout-Lesen noetig)
+                Object.keys(stationen.vatsim).forEach(function (icao) {
+                    var v = stationen.vatsim[icao], i = stationen.ivao[icao];
+                    if (!i || !v.firstElementChild || !i.firstElementChild) return;
+                    var wv = parseFloat(v.firstElementChild.style.width) || 0, wi = parseFloat(i.firstElementChild.style.width) || 0;
+                    v.firstElementChild.style.marginLeft = (-(wi + 2) / 2) + 'px';
+                    i.firstElementChild.style.marginLeft = ((wv + 2) / 2) + 'px';
+                });
+
+                // 3. messen (nur lesen)
+                var rahmen = map.getContainer().getBoundingClientRect();
+                function rechteck(el) {
+                    var r = el.getBoundingClientRect();
+                    if (!r.width || !r.height) return null;
+                    if (r.right < rahmen.left || r.left > rahmen.right || r.bottom < rahmen.top || r.top > rahmen.bottom) return null;
+                    return { l: r.left, t: r.top, r: r.right, b: r.bottom };
+                }
+                // Lotsenkasten: nur der sichtbare Inhalt (Kuerzel + Abzeichen), nicht der Leerraum der Box
+                function inhalt(el) {
+                    var innen = el.firstElementChild;
+                    if (!innen || getComputedStyle(innen).display === 'none') return null;
+                    var teile = Array.prototype.slice.call(innen.children).map(rechteck).filter(Boolean);
+                    if (!teile.length) return null;
+                    return teile.reduce(function (a, b) { return { l: Math.min(a.l, b.l), t: Math.min(a.t, b.t), r: Math.max(a.r, b.r), b: Math.max(a.b, b.b) }; });
+                }
+                var feste = [], vaFlieger = [], kaesten = [], rufzeichen = [], etiketten = [], netzflieger = [];
+                icons.forEach(function (el) {
+                    if (el.style.display === 'none') return;
+                    if (el.classList.contains('lm3-marker')) {
+                        var sym = el.querySelector('.lm3-flieger'), lab = el.querySelector('.lm3-mlabel');
+                        var rs = sym && rechteck(sym), rb = rechteck(el);
+                        var gew = el.classList.contains('ist-gewaehlt');
+                        var rl = lab && rechteck(lab);
+                        if (rs) vaFlieger[gew ? 'unshift' : 'push']({ el: el, r: rs, box: rb || rs, label: rl && gew ? rl : null });
+                        if (rl && !gew) rufzeichen.push({ el: lab, r: rl });
+                    } else if (el.classList.contains('vatsim-airport-marker') || el.classList.contains('ivao-airport-marker')) {
+                        var ri = inhalt(el);
+                        if (ri) kaesten.push({ el: el, r: ri, gewicht: el.querySelectorAll('span[style*="inline-flex"]').length });
+                    } else if (el.classList.contains('lm3-tracon')) {
+                        var rt = rechteck(el.firstElementChild || el);
+                        if (rt) kaesten.push({ el: el, r: rt, gewicht: 1 });
+                    } else if (el.classList.contains('lm3-sektor-etikett')) {
+                        // Teilsektoren (EDGG dreifach) liegen dicht beieinander; die Flaeche bleibt sichtbar.
+                        var re = rechteck(el.firstElementChild || el);
+                        if (re) etiketten.push({ el: el, r: re });
+                    } else if (el.querySelector('.lm3-netz-flieger')) {
+                        var rn = rechteck(el.querySelector('.lm3-netz-flieger'));
+                        if (rn) netzflieger.push({ el: el, r: rn });
+                    } else {
+                        var ro = rechteck(el);
+                        if (ro) feste.push(ro);   // Unbekanntes bleibt stehen und zaehlt als Hindernis
+                    }
+                });
+                kaesten.sort(function (a, b) { return b.gewicht - a.gewicht; });
+
+                // 4. platzieren, dann schreiben
+                var belegt = feste.slice(), weg = [];
+                function schneidet(r, o) { return r.l < o.r + 1 && r.r > o.l - 1 && r.t < o.b + 1 && r.b > o.t - 1; }
+                function trifft(r) {
+                    for (var k = 0; k < belegt.length; k++) if (schneidet(r, belegt[k])) return belegt[k];
+                    return null;
+                }
+                // VA-Flieger: der vordere bleibt, verdeckte zaehlen als "+n" an ihm (der gewaehlte steht vorn)
+                var gastgeber = [];
+                vaFlieger.forEach(function (x) {
+                    for (var k = 0; k < gastgeber.length; k++) {
+                        if (schneidet(x.r, gastgeber[k].r)) { gastgeber[k].mehr++; weg.push(x.el); return; }
+                    }
+                    x.mehr = 0;
+                    gastgeber.push(x);
+                });
+                gastgeber.forEach(function (x) {
+                    // mit "+n" belegt der Flieger seinen ganzen Rahmen (dort sitzt die Zahl)
+                    belegt.push(x.mehr ? { l: x.box.l, t: x.box.t - 3, r: x.box.r + 3, b: x.box.b } : x.r);
+                    if (x.label) belegt.push(x.label);
+                });
+                [kaesten, rufzeichen].forEach(function (gruppe) {
+                    gruppe.forEach(function (x) {
+                        if (trifft(x.r)) weg.push(x.el); else belegt.push(x.r);
+                    });
+                });
+                // Sektor-Etikett: erst ein Stueck neben die Mitte ruecken (bleibt in der Flaeche),
+                // erst ohne freien Platz ausblenden.
+                var RUECKE = [[0, 0], [0, -40], [0, 40], [-70, 0], [70, 0], [-70, -40], [70, -40], [-70, 40], [70, 40]], gerueckt = [];
+                etiketten.forEach(function (x) {
+                    for (var k = 0; k < RUECKE.length; k++) {
+                        var d = RUECKE[k], r = { l: x.r.l + d[0], t: x.r.t + d[1], r: x.r.r + d[0], b: x.r.b + d[1] };
+                        if (r.r < rahmen.left || r.l > rahmen.right || r.b < rahmen.top || r.t > rahmen.bottom) continue;
+                        if (trifft(r)) continue;
+                        belegt.push(r);
+                        if (k) gerueckt.push({ el: x.el, d: d });
+                        return;
+                    }
+                    weg.push(x.el);
+                });
+                netzflieger.forEach(function (x) {
+                    if (trifft(x.r)) weg.push(x.el); else belegt.push(x.r);
+                });
+                gerueckt.forEach(function (g) { if (g.el.firstElementChild) g.el.firstElementChild.style.transform = 'translate(' + g.d[0] + 'px,' + g.d[1] + 'px)'; });
+                weg.forEach(function (el) { el.classList.add('lm3-verdeckt'); });
+                gastgeber.forEach(function (x) {
+                    if (!x.mehr) return;
+                    var z = document.createElement('span');
+                    z.className = 'lm3-mehr';
+                    z.textContent = '+' + x.mehr;
+                    z.title = x.mehr + ' ' + LM_T.weitereFluege;
+                    L.DomEvent.on(z, 'click', function (ev) {
+                        L.DomEvent.stop(ev);
+                        map.fire('lm3nutzerzoom');
+                        if (x.el._leaflet_pos) map.setView(map.layerPointToLatLng(x.el._leaflet_pos), Math.min(map.getZoom() + 2, map.getMaxZoom()));
+                    });
+                    x.el.appendChild(z);
+                });
+            }
+
             (function lm3Start() {
                 var cfg = window.LIVE_MAP_UI || {};
                 var mapEl = document.getElementById('map');
-                var wrap = document.getElementById('lm3');
-                if (!window.L || !L.map || !mapEl) {
-                    console.error('[LiveMap] Leaflet nicht geladen — Karte kann nicht starten');
+                var wrap = document.getElementById('lm-root');
+                if (!mapEl || !wrap) {
+                    console.error('[LiveMap] Karten-Element fehlt — Karte kann nicht starten');
                     return;
                 }
 
                 // Breite des Widgets (nicht des Fensters!) bestimmt den Aufbau:
                 // im GSG-Rahmen nimmt die Seitenleiste ~250 px weg.
                 function messeBreite() {
-                    if (!wrap) return;
                     var b = wrap.getBoundingClientRect().width;
                     wrap.classList.toggle('lm3--schmal', b < 760);
-                    wrap.classList.toggle('lm3--mittel', b >= 760 && b < 1100);
                 }
+                // Hoehe: Fenster minus das, was ueber dem Widget steht (Navigations-
+                // leiste des Themes) und was unten fest am Fenster klebt (Cookie-
+                // Leiste), begrenzt durch Mindest-/Hoechsthoehe aus der Verwaltung.
+                var flaeche = document.getElementById('lm3-flaeche') || wrap;
+                function messeHoehe() {
+                    var oben = flaeche.getBoundingClientRect().top + (window.pageYOffset || 0);
+                    var untenFest = 0;
+                    [].forEach.call(document.body.querySelectorAll('body > *'), function (e) {
+                        if (e.contains(wrap)) return;
+                        var st = getComputedStyle(e);
+                        if (st.position !== 'fixed' || st.display === 'none' || st.visibility === 'hidden') return;
+                        var r = e.getBoundingClientRect();
+                        if (r.height > 0 && r.height < window.innerHeight / 2 && r.bottom >= window.innerHeight - 1) untenFest = Math.max(untenFest, r.height);
+                    });
+                    // tiefer geschachtelte feste Leiste unten (wie messeObenFrei)
+                    for (var e = document.elementFromPoint && document.elementFromPoint(window.innerWidth / 2, window.innerHeight - 2);
+                        e && e !== document.body && !wrap.contains(e); e = e.parentElement) {
+                        if (getComputedStyle(e).position !== 'fixed') continue;
+                        var r = e.getBoundingClientRect();
+                        if (r.height < window.innerHeight / 2) untenFest = Math.max(untenFest, r.height);
+                        break;
+                    }
+                    // Tafel unten: ihre Kopfzeile soll noch im Fenster stehen, damit man
+                    // sieht, dass unter der Karte die Flugliste kommt.
+                    var kopfUnten = wrap.classList.contains('lm3--tafel-unten') && document.getElementById('lm3-tafel-kopf');
+                    if (kopfUnten && kopfUnten.offsetParent !== null) untenFest += kopfUnten.getBoundingClientRect().height;
+                    var h = window.innerHeight - Math.max(0, oben) - untenFest - 16;
+                    h = Math.max(cfg.minHoehe || 420, Math.min(cfg.maxHoehe || 1000, h));
+                    flaeche.style.height = Math.round(h) + 'px';
+                    messeObenFrei();
+                }
+                // Feste Leiste des Themes ueber der Kartenoberkante (Cookie-Hinweis oben bei
+                // Seven/Disposable, beim Scrollen die Navigationsleiste): Tafel, Zoom und
+                // Knoepfe ruecken um die verdeckte Hoehe nach unten, statt darunter zu liegen.
+                function messeObenFrei() {
+                    var k = flaeche.getBoundingClientRect(), frei = 0;
+                    [].forEach.call(document.body.querySelectorAll('body > *'), function (e) {
+                        if (e.contains(wrap)) return;
+                        var st = getComputedStyle(e);
+                        if (st.position !== 'fixed' || st.display === 'none' || st.visibility === 'hidden' || +st.opacity === 0) return;
+                        var r = e.getBoundingClientRect();
+                        if (!r.height || r.height >= window.innerHeight / 2 || r.top > k.top + 1) return;
+                        if (r.right <= k.left || r.left >= k.right) return;
+                        frei = Math.max(frei, Math.min(r.bottom - k.top, k.height / 2));
+                    });
+                    // Tiefer geschachtelte feste Koepfe (SPTheme: .page-header ist kein Kind
+                    // von <body>): was an der Kartenoberkante obenauf liegt, bis zum festen
+                    // Vorfahren hochlaufen.
+                    // ab der sichtbaren Oberkante (gescrollt steht die Karte z. B. bei -0,5 px)
+                    var y = Math.max(k.top, 0) + 2;
+                    if (k.bottom > y && y < window.innerHeight && document.elementFromPoint) {
+                        [0.2, 0.5, 0.8].forEach(function (anteil) {
+                            var e = document.elementFromPoint(k.left + k.width * anteil, y);
+                            for (; e && e !== document.body && !wrap.contains(e); e = e.parentElement) {
+                                var pos = getComputedStyle(e).position;
+                                if (pos !== 'fixed' && pos !== 'sticky') continue;
+                                var r = e.getBoundingClientRect();
+                                if (r.height < window.innerHeight / 2) frei = Math.max(frei, Math.min(r.bottom - k.top, k.height / 2));
+                                break;
+                            }
+                        });
+                    }
+                    wrap.style.setProperty('--lm-oben-frei', Math.max(0, Math.round(frei)) + 'px');
+                }
+                // Hell/Dunkel: Einstellung, sonst das Theme (Seven und SPTheme setzen
+                // data-bs-theme am <html>; manche Themes eine Klasse am <body>).
+                function istDunkel() {
+                    if (cfg.themeModus === 'dark') return true;
+                    if (cfg.themeModus === 'light') return false;
+                    var h = document.documentElement, b = document.body;
+                    // Seven/SPTheme: data-bs-theme; Disposable_v3 (Dunkel-Schalter): body data-theme
+                    var attr = (h.getAttribute('data-bs-theme') || (b && b.getAttribute('data-bs-theme')) ||
+                        h.getAttribute('data-theme') || (b && b.getAttribute('data-theme')) || '').toLowerCase();
+                    if (attr) return attr === 'dark';
+                    return [h, b].some(function (e) { return e && /(^|\s)(dark|dark-mode|theme-dark|darkmode)(\s|$)/.test(e.className || ''); });
+                }
+                function setzeDunkel() { wrap.classList.toggle('ist-dunkel', istDunkel()); }
                 messeBreite();
+                setzeDunkel();
+                messeHoehe();
 
                 var map = L.map(mapEl, {
                     center: cfg.center || [50, 10],
@@ -1928,18 +2463,8 @@
                 // Schmal passt die Welt erst ab Zoom 1 hinein (Fluege EU + Pazifik).
                 if (wrap && wrap.classList.contains('lm3--schmal')) map.setMinZoom(1);
                 window._liveMapInstance = map;
-                // Bringt die Seite keine Leaflet-Stile mit, liegen Kacheln als
-                // Bilder untereinander statt als Karte. Dann den Rueckfall-Block
-                // aus live_map_styles einschalten.
-                (function leafletStileSicherstellen() {
-                    var pane = mapEl.querySelector('.leaflet-pane');
-                    var rueckfall = document.getElementById('lm3-leaflet-css');
-                    if (pane && rueckfall && getComputedStyle(pane).position !== 'absolute') {
-                        rueckfall.media = 'all';
-                        map.invalidateSize();
-                    }
-                })();
-                L.control.zoom({ position: 'bottomright' }).addTo(map);
+                // Zoom oben links: dort hat das Raster eine eigene Spalte dafuer.
+                L.control.zoom({ position: 'topleft' }).addTo(map);
 
                 // ── Grundkarte (wie bisher, ohne die Grundebene des Kerns) ──
                 (function grundkarte() {
@@ -1951,10 +2476,12 @@
                         dark: { label: 'Carto Dark', url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', options: { subdomains: 'abcd', maxZoom: 20, attribution: '&copy; OpenStreetMap contributors &copy; CARTO' } },
                         satellite: { label: 'Satellite', url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', options: { maxZoom: 18, attribution: 'Tiles &copy; Esri' } }
                     };
-                    var keys = ['positron', 'osm', 'dark'];
-                    if (allowSatellite) keys.push('satellite');
-                    // CARTO verlangt seit dem 26.08.2026 einen Schluessel (sonst Wasserzeichen).
+                    // CARTO verlangt seit dem 26.08.2026 einen Schluessel (sonst
+                    // Wasserzeichen). Ohne Schluessel bietet der Umschalter die
+                    // CARTO-Stile gar nicht erst an (5.1).
                     var cartoKey = String(cfg.cartoApiKey || '');
+                    var keys = cartoKey ? ['positron', 'osm', 'dark'] : ['osm'];
+                    if (allowSatellite) keys.push('satellite');
                     var mitKey = function (url) {
                         if (!cartoKey || url.indexOf('cartocdn.com') === -1 || /[?&]key=/.test(url)) return url;
                         return url + (url.indexOf('?') === -1 ? '?' : '&') + 'key=' + encodeURIComponent(cartoKey);
@@ -1967,10 +2494,29 @@
                     });
                     var gespeichert = '';
                     try { gespeichert = String(localStorage.getItem('livemap_basemap') || '').toLowerCase(); } catch (e) {}
-                    var wahl = gespeichert && ebenen[gespeichert] ? gespeichert : String(cfg.defaultBasemap || 'positron').toLowerCase();
-                    if (!ebenen[wahl]) wahl = 'positron';
+                    // Ohne eigene Wahl folgt der Kartenstil dem Theme: dunkel → CARTO
+                    // Dark Matter (nur mit Schluessel), hell → Standard der Verwaltung.
+                    var themeWahl = function () {
+                        var std = String(cfg.defaultBasemap || 'osm').toLowerCase();
+                        if (wrap.classList.contains('ist-dunkel') && ebenen.dark && (std === 'positron' || std === 'osm')) return 'dark';
+                        return ebenen[std] ? std : 'osm';
+                    };
+                    var wahl = gespeichert && ebenen[gespeichert] ? gespeichert : themeWahl();
+                    if (!ebenen[wahl]) wahl = 'osm';
                     ebenen[wahl].addTo(map);
                     if (wrap) wrap.setAttribute('data-grundkarte', wahl);
+                    // Wechselt das Theme spaeter (Schalter in Seven/SPTheme), zieht die
+                    // Karte mit — ausser jemand hat selbst einen Stil gewaehlt.
+                    window._lmThemeGewechselt = function () {
+                        var gew = '';
+                        try { gew = String(localStorage.getItem('livemap_basemap') || ''); } catch (e) {}
+                        if (gew) return;
+                        var neu = themeWahl();
+                        if (neu === wahl || !ebenen[neu]) return;
+                        map.removeLayer(ebenen[wahl]); ebenen[neu].addTo(map); wahl = neu;
+                        wrap.setAttribute('data-grundkarte', neu);
+                        if (kartenListe) [].forEach.call(kartenListe.children, function (b) { b.classList.toggle('active', b.getAttribute('data-grundkarte') === neu); });
+                    };
                     // Umschalter als Aufklapper in der Werkzeugleiste (statt der
                     // Leaflet-Ebenensteuerung unten rechts — die nahm dem Flugdetail
                     // bei 720 px Fensterhoehe den Platz).
@@ -2023,17 +2569,29 @@
                     });
                 });
                 map.on('zoomend', function () { updateCtrlZoom(map); });
+                // nach updateCtrlZoom registriert: rAF laeuft erst, wenn dessen display-Werte stehen
+                map.on('zoomend moveend layeradd layerremove', lmEntwirrenPlanen);
+                // Nach einem animierten Zoom gleiten die Symbole noch ~0,25 s (CSS-Uebergang);
+                // gemessen wird dann zu frueh. Ein zweiter Lauf nach dem Gleiten.
+                var lmNachZoom = null;
+                map.on('zoomend', function () { clearTimeout(lmNachZoom); lmNachZoom = setTimeout(lmEntwirrenPlanen, 350); });
 
                 var va = starteVaFluege(map);
 
                 // ── Netz-Schalter (wie bisher) ──
                 var btnNetVatsim = document.getElementById('btnNetVatsim'), btnNetIvao = document.getElementById('btnNetIvao');
+                // Punkt am Netz-Knopf: gruen, solange VATSIM oder IVAO eingeschaltet ist
+                function netzPunkt() { var d = document.getElementById('vatsimDot'); if (d) d.classList.toggle('live', showVatsim || showIvao); }
+                netzPunkt();
+                // nach dem eigentlichen Umschalten (dieser Lauscher haengt davor)
+                [btnNetVatsim, btnNetIvao].forEach(function (b) { if (b) b.addEventListener('click', function () { setTimeout(netzPunkt, 0); }); });
                 if (btnNetVatsim) { btnNetVatsim.classList.toggle('active', showVatsim); btnNetVatsim.addEventListener('click', function () { showVatsim = !showVatsim; btnNetVatsim.classList.toggle('active', showVatsim); if (!showVatsim) { map.removeLayer(vatsimPilotsLayer); map.removeLayer(vatsimCtrlLayer); map.removeLayer(vatsimSectorLayer); } else { loadVatsim(map); applyLayerVisibility(); } }); }
                 if (btnNetIvao) { btnNetIvao.classList.toggle('active', showIvao); btnNetIvao.addEventListener('click', function () { showIvao = !showIvao; btnNetIvao.classList.toggle('active', showIvao); if (!showIvao) { map.removeLayer(ivaoPilotsLayer); map.removeLayer(ivaoCtrlLayer); map.removeLayer(ivaoSectorLayer); } else { loadIvao(map); applyLayerVisibility(); } }); }
                 var btnPilots = document.getElementById('btnVatsimPilots'), btnCtrl = document.getElementById('btnVatsimCtrl'), btnSectors = document.getElementById('btnVatsimSectors');
                 if (btnPilots) { btnPilots.classList.toggle('active', vatsimShowPilots); btnPilots.addEventListener('click', function () { vatsimShowPilots = !vatsimShowPilots; btnPilots.classList.toggle('active', vatsimShowPilots); applyLayerVisibility(); }); }
                 if (btnCtrl) { btnCtrl.classList.toggle('active', vatsimShowCtrl); btnCtrl.addEventListener('click', function () { vatsimShowCtrl = !vatsimShowCtrl; btnCtrl.classList.toggle('active', vatsimShowCtrl); applyLayerVisibility(); }); }
-                if (btnSectors) { btnSectors.classList.toggle('active', vatsimShowSectors); btnSectors.addEventListener('click', function () { vatsimShowSectors = !vatsimShowSectors; btnSectors.classList.toggle('active', vatsimShowSectors); applyLayerVisibility(); }); }
+                if (btnSectors) { btnSectors.classList.toggle('active', vatsimShowSectors); btnSectors.addEventListener('click', function () { vatsimShowSectors = !vatsimShowSectors; btnSectors.classList.toggle('active', vatsimShowSectors); applyLayerVisibility();
+                    if (vatsimShowSectors && showIvao && letzteIvaoFirMap) ladeGrenzen().then(function(){ renderActiveSectors(letzteIvaoFirMap, ivaoSectorLayer); }).catch(function(){}); }); }
                 applyLayerVisibility();
 
                 // ── Werkzeugleiste: Netz / Wetter als Aufklapper, nie gleichzeitig ──
@@ -2050,21 +2608,22 @@
                         aufklapper.forEach(function (b) { if (b.box) b.box.hidden = true; if (b.knopf) b.knopf.setAttribute('aria-expanded', 'false'); });
                         a.box.hidden = !offen;
                         a.knopf.setAttribute('aria-expanded', offen ? 'true' : 'false');
-                        if (wrap) wrap.classList.toggle('hat-aufklapper', offen);
+                        // Schmal teilen sich Kasten, Tafel und Detail eine Spalte.
+                        if (offen && va && va.schmal()) { va.setzeTafel(false); va.schliesseDetail(); }
+                        if (va && !va.schmal()) va.passeRechts();
                     });
                 });
                 if (cfg.showTopFlightsPanel === false) {
-                    var p = document.getElementById('lm3-panel');
-                    var m = document.getElementById('mob-toggle-panel');
+                    var p = document.getElementById('va-flights-panel');
                     if (p) p.hidden = true;
-                    if (m) m.hidden = true;
                 }
+                if (cfg.mobileShowFlightsButton === false) wrap.classList.add('ohne-tafel-mobil');
 
-                // Startzustand der Liste: breit offen, schmal nach Einstellung.
+                // Startzustand der Tafel: breit eingeklappt (Kopfzeile wie 4.7.9),
+                // schmal nach Einstellung „Mobil: Flugliste offen".
                 function startPanel() {
                     if (!va) return;
-                    var schmal = wrap && wrap.classList.contains('lm3--schmal');
-                    va.setzePanel(schmal ? !!cfg.mobileFlightsOpen : true);
+                    va.setzeTafel(va.schmal() ? !!cfg.mobileFlightsOpen : false);
                 }
                 startPanel();
                 // Admin-Einstellungen „Mobil: Wetter/Netzwerk offen" (4.7.x): schmal
@@ -2083,9 +2642,37 @@
                     map.invalidateSize();
                 };
                 if (window.ResizeObserver && wrap) new ResizeObserver(neuMessen).observe(wrap);
-                else window.addEventListener('resize', neuMessen);
+                window.addEventListener('resize', function () { messeHoehe(); neuMessen(); if (va) va.passeRechts(); });
+                // Theme-Schalter (hell/dunkel) beobachten.
+                if (window.MutationObserver) {
+                    var beiThemeWechsel = function () {
+                        var vorher = wrap.classList.contains('ist-dunkel');
+                        setzeDunkel();
+                        if (vorher !== wrap.classList.contains('ist-dunkel') && window._lmThemeGewechselt) window._lmThemeGewechselt();
+                    };
+                    var mo = new MutationObserver(beiThemeWechsel);
+                    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-bs-theme', 'data-theme', 'class'] });
+                    if (document.body) mo.observe(document.body, { attributes: true, attributeFilter: ['data-bs-theme', 'data-theme', 'class'] });
+                }
+                // Spaet geladene Leisten (Cookie-Hinweis) aendern die freie Hoehe.
+                window.addEventListener('load', function () { messeHoehe(); map.invalidateSize(); });
+                // Oben frei: beim Scrollen (feste Navigationsleiste) und wenn der Cookie-
+                // Hinweis nach dem Klick ausblendet (Klasse + Uebergang, kein childList).
+                var obenTimer = null;
+                function obenSpaeter() { clearTimeout(obenTimer); obenTimer = setTimeout(messeObenFrei, 120); }
+                window.addEventListener('scroll', obenSpaeter, { passive: true });
+                document.addEventListener('click', function () { setTimeout(obenSpaeter, 400); }, true);
+                document.addEventListener('transitionend', obenSpaeter, true);
+                // Manche Themes haengen die Cookie-Leiste erst nach dem Laden in <body>
+                // (SPTheme) — dann neu messen, sonst laege sie ueber dem Tafelkopf unten.
+                if (window.MutationObserver && document.body) {
+                    var hoeheTimer = null;
+                    new MutationObserver(function () {
+                        clearTimeout(hoeheTimer);
+                        hoeheTimer = setTimeout(function () { messeHoehe(); map.invalidateSize(); }, 300);
+                    }).observe(document.body, { childList: true });
+                }
             })();
         });
     </script>
     <!-- lm3:skripte-ende -->
-@endsection

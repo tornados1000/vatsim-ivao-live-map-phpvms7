@@ -4,6 +4,237 @@ All notable changes to this project are documented in this file.
 
 ---
 
+## [5.1.1] — 2026-11-05
+
+### Fixed / Behoben
+- **Einstellungen wurden nicht übernommen** (gemeldet von Disposable Hero im phpVMS-Discord): Auf
+  Seiten mit phpVMS im Produktionsmodus und echtem Cache (file, redis …) kam ein
+  abgewähltes Häkchen nach dem Speichern zurück, ein neuer OpenWeatherMap-Schlüssel
+  schien zu fehlen und die Karte zeigte kein Wetter – bis zu 24 h oder bis zum Leeren der
+  Caches. Ursache: phpVMS cacht `setting($key)` unter `settings.<key wie übergeben>`
+  (`settings.acars.livemap_…`), das Modul löschte nur `settings.acars_livemap_…`.
+  Speichern löscht jetzt beide Schlüssel; Test in `tests/live_flights_probe.php` über den
+  echten `setting()`-Helfer.
+  *Settings saved under Admin → Live Map did not show up on sites running phpVMS in
+  production with a real cache: the module cleared the wrong cache key. Saving now clears
+  the key phpVMS really uses.*
+
+### Upgrade
+Nur `modules/LiveMap` tauschen (FTP, siehe INSTALL.txt), die Theme-Datei bleibt.
+Bereits hängende Werte: Admin → Live Map einmal öffnen und speichern.
+*Only replace `modules/LiveMap`; the theme file stays. Values already stuck: open
+Admin → Live Map once and click Save Settings.*
+
+---
+
+## [5.1.0] — 2026-11-04
+
+Optik wieder kompakt wie 4.7.9, Technik von 5.0; läuft unter Seven, SPTheme und Disposable_v3.
+*Compact look of 4.7.9 again, on the 5.0 technology; works under Seven, SPTheme and Disposable_v3.*
+
+### Changed / Geändert
+- **Kompakte Optik wie 4.7.9, moderner gestaltet.** Flugtafel mit „Aktiv | Geplant“
+  (Reiter, oben aufklappbar, Spalten Flug mit Logo / Route / Höhe / GS / Rest mit
+  Fortschrittsbalken / Phase / Pilot; schmale Fenster geben Spalten ab), Detailkasten wie der
+  4.7.9-Crew-Pass (Route mit Flughafennamen, Pilot, Flugzeug, Höhe, GS, Kurs,
+  V/S, Fortschrittsbalken, „Mehr Werte“, PIREP-Link, Folgen). Felder ohne
+  Daten werden weggelassen. Die Technik von 5.0 (Daten über das Modul) bleibt.
+  *Compact flight board and detail box as in 4.7.9, 5.0 data path kept.*
+- **Neugestaltung (Thomas 03.11.2026: „altbacken“, Liste unten „blöd
+  abgeschnitten und blöd sortiert“):** flache Flächen mit Haarlinie statt
+  Verlaufsbalken, Werkzeuge als eine Knopfgruppe, getönte Phasen-Pillen,
+  Detailkopf mit Phasen-Streifen; die Verwaltungsfarbe „Kopf der Flugliste“ ist
+  die Akzentfarbe (hell). Schriftgrößen und Zeilenhöhen wie 4.7.9. Lage unten
+  ohne Aufklapp-Kopf (die Reiterzeile ist der Kopf), keine Höhenbegrenzung.
+  Spaltenköpfe sortieren (Standard Phase in Flugreihenfolge, darin Rest-Strecke;
+  Offline unten; fehlende Werte hinten; Rufzeichen natürlich, GSG7 vor GSG101),
+  Wahl in `localStorage` (`livemap_sort`). Ohne Logo: Airline-Buchstaben;
+  fehlt das Logo im Flug, das der phpVMS-Airline (`AIRLINE_LOGOS`). Grüner Punkt an
+  jedem eingeschalteten Schalter (Netz, Piloten, Lotsen, FIR-Sektoren, Wetter); bei
+  VATSIM/IVAO grau = lädt, rot = Fehler. Popups dunkel lesbar.
+  *Redesign: flat surfaces, grouped tools, tinted phases, admin header colour as
+  accent; bottom list without a fold-out header and without height limit;
+  sortable columns (default phase in flight order, then distance to go), stored
+  in the browser; airline letters / airline logo fallback; green dot on every switch that is on
+  (grey loading / red error on VATSIM/IVAO); dark popups readable.*
+- **Datenquelle „Beide“** (neben phpVMS und AeroACARS Live): AeroACARS- und
+  phpVMS-Flug mit demselben Piloten (phpVMS-Konto `users.id`) und demselben
+  Rufzeichen sind ein Flug (Registrierung, PIREP-Link und Logo kommen vom PIREP). Fällt eine Quelle aus,
+  zeigt die Karte die andere mit einem Hinweis.
+  *Source "Both": same pilot + same callsign = one flight; if one source fails,
+  the other is shown with a notice.*
+- **Flugzeugsymbole nach Klasse:** sieben Silhouetten (Kolben, Turboprop,
+  Bizjet, Schmalrumpf, Großraum, Vierstrahler, Hubschrauber), die Nase zeigt in
+  Flugrichtung, am Boden etwas kleiner, Farbe = Flugphase. Unbekannter Typ =
+  Schmalrumpf. Netz-Flieger (VATSIM/IVAO) bleiben graue Schmalrümpfe.
+  *Seven aircraft silhouettes by class, nose in flight direction, smaller on the ground.*
+- **Theme-unabhängig durch eigenes Leaflet 1.9.4** (gepinnt, mit
+  Subresource-Integrity), das die Leaflet-Version des Themes nicht berührt.
+  *Own pinned Leaflet 1.9.4 with SRI, independent of the theme's Leaflet.*
+- **Ansichten liegen im Modul** (`livemap::widget`). Die Theme-Datei
+  `live_map.blade.php` besteht nur noch aus einem `@include`; ein Update
+  betrifft künftig nur `modules/LiveMap`. `live_map_styles.blade.php` und
+  `live_map_scripts.blade.php` entfallen.
+  *Views now ship inside the module; the theme file is a single `@include`.*
+- **Kartenelemente entwirrt:** VA-Flieger liegen vor Lotsenkasten, vor
+  Rufzeichen, vor Netz-Fliegern; gestapelte VA-Flüge werden zu einem Symbol mit
+  „+n“; VATSIM- und IVAO-Kasten desselben Flughafens stehen nebeneinander. Der
+  IVAO-Kasten hat keinen orangen Rahmen mehr, sondern den grauen Zusatz „IVAO“.
+  *Map elements untangled (stacking order, "+n" for stacked flights, VATSIM/IVAO
+  boxes side by side, IVAO without orange frame).*
+- **Zoomen beendet „Folgen“** (Mausrad, Knöpfe, Doppelklick, Tasten, „+n“).
+  *Any zoom ends follow mode.*
+- **Raster ohne Überlappung** der Bedienelemente bei allen Fenstergrößen;
+  schmaler Modus unter 760 px Widget-Breite (eine Spalte, nur Kasten, Tafel
+  oder Detail ist offen).
+  *Layout grid: no overlapping controls at any window size; narrow mode below 760 px.*
+- **Dunkelmodus** erkennt `data-bs-theme` (Seven, SPTheme) und `data-theme`
+  (Disposable_v3) und folgt Theme-Wechseln zur Laufzeit; neue Einstellung
+  Hell/Dunkel/Auto.
+  *Dark mode detects both theme attributes; new light/dark/auto setting.*
+- **Höhe aus der Fensterhöhe** mit Mindest- und Höchsthöhe (Verwaltung,
+  Standard 420/1000 px) statt fester Werte.
+  *Map height follows the window within a configurable minimum/maximum.*
+- **Ohne CARTO-Schlüssel ist die Standardkarte OpenStreetMap**; die
+  CARTO-Stile erscheinen dann nicht im Umschalter (Hinweis im Kasten „Kartenstil“).
+  *Without a CARTO key the default map is OpenStreetMap.*
+
+- **Lage der Flugtafel statt „Layout-Modus“** (Admin → Live Map, Schlüssel
+  `acars.livemap_flights_panel`): *oben* (aufklappbar über der Karte, wie 4.7.9),
+  *unten* (feste Tabelle unter der Karte, ganze Breite, außerhalb des
+  Kartenbereichs) oder *aus*. Die alten Schlüssel `acars.livemap_old_style` und
+  `acars.livemap_show_top_flights_panel` werden weiter mitgeschrieben. Fehlt die
+  neue Einstellung (Update von 4.7.x), wird die Lage aus den alten Schlüsseln
+  abgeleitet: ist `old_style` an oder `show_top_flights_panel` ausdrücklich aus,
+  gilt *aus*, sonst *oben*. **Neue Installation (keiner der Schlüssel gesetzt): *unten*,
+  der empfohlene Standard** (Thomas 04.11.2026). Neue Teildatei `partials/tafel.blade.php`.
+  *Flight panel position replaces "Layout mode": top (collapsible over the map),
+  bottom (fixed full-width table below the map, outside the map area) or off.
+  The old keys are still written; without the new setting (update from 4.7.x)
+  the position is derived from them: old_style on, or show_top_flights_panel
+  explicitly off = off, otherwise top. **A new install (none of the keys set) starts at
+  bottom, the recommended default.** New partial `partials/tafel.blade.php`.*
+- **Gestaltung:** Reicht die Höhe der rechten Spalte nicht für Kasten und
+  Detail, klappt der Detailkasten auf seine Kopfzeile ein (Klick auf das
+  Rufzeichen ▾ klappt ihn auf, der Kasten daneben geht zu); ein neuer Flug
+  schließt einen Kasten, der nicht mehr daneben passt. Die schmale Tafel zeigt
+  keine Logos, damit das Rufzeichen lesbar bleibt. Der Tafelkopf zeigt
+  Live-Punkt und Zahlen.
+  *Detail box collapses to its header row when a box beside it does not fit
+  (callsign ▾ expands it); narrow board without logos; board header with live dot and counts.*
+- **Kartenelemente unter den Bedienelementen:** Lotsenkästen und
+  Sektor-Etiketten liegen unter Tafel, Zoom und Werkzeugen, wie in 4.7.9.
+  VA-Flieger liegen über allen Lotsen-Symbolen (gemessen: GSG101 lag unter
+  LFJL, ein Klick öffnete das Lotsen-Popup statt der Flugkarte).
+  *VA aircraft above all controller symbols (a controller symbol caught the click).*
+  *Map elements (controller boxes, sector labels) sit below the controls (board, zoom, tools), as in 4.7.9.*
+- **VATSIM/IVAO — Sprechfunk-Riegel 117–137 MHz:** Ein ATIS außerhalb dieses
+  Bereichs und ein Beobachter ohne Sprechfrequenz zählen nicht. Ein Beobachter
+  auf einer Sprechfrequenz an einem echten Platz erscheint als Kasten mit
+  grauem „O“.
+  *Voice-frequency gate 117–137 MHz: ATIS outside it and observers without a voice frequency do not count; an observer on a voice frequency at a real position shows as a box with a grey "O".*
+- **VATSIM/IVAO — Lotsen nach aufgelöster Stelle gruppiert:** CLT_GND und
+  KCLT_ATIS sind ein Kasten „KCLT“. Beim Auflösen der VATSpy-Plätze steht der
+  Funk-Präfix vor dem ICAO-Code, ein echter Platz vor einem Behelf.
+  *Controllers grouped by resolved facility (CLT_GND + KCLT_ATIS = one KCLT box).*
+- **VATSIM/IVAO — FIR-Zuordnung nach dem Verfahren von VATSIM Radar:**
+  längster Präfix, Teilsektoren, Sammelpositionen aus `[UIRs]` (die längste
+  passende), `_FSS` = ozeanische Fläche. Die alte Grobzuordnung bleibt als
+  Rückfall. IVAO läuft über denselben Weg (Teilsektoren getrennt, Plätze nach
+  aufgelöster Stelle gruppiert) und lädt VATSpy und Grenzen jetzt selbst
+  (Sektoren erschienen vorher nur mit VATSIM).
+  *FIR assignment as VATSIM Radar does it: longest prefix, sub-sectors, collective positions from [UIRs] (longest match), _FSS = oceanic area; old coarse matching kept as fallback; IVAO uses the same path and loads VATSpy and boundaries itself (sectors used to need VATSIM).*
+- **VATSIM/IVAO — Robustheit:** Abrufe mit Zeitgrenze (20 s, VATSpy und
+  Grenzen 60 s, jeweils bis die Antwort ganz gelesen ist), Sektoren werden
+  erst nach geladenen Grenzen geleert, VATSpy und Grenzen werden nach einem
+  Fehlschlag nach 5 Minuten neu versucht. Die Quellen kommen über jsDelivr
+  (Browser-Puffer 7 Tage statt 5 min). Sektor-Etiketten werden gerückt und,
+  wenn kein Platz bleibt, ausgeblendet, statt sich zu überlappen.
+  *Fetches with a timeout covering the whole response (20 s; VATSpy/boundaries 60 s), sectors cleared only after boundaries have loaded, VATSpy/boundaries retried 5 minutes after a failure; sources via jsDelivr (7-day browser cache instead of 5 min); sector labels are nudged or hidden instead of overlapping.*
+
+### Not adopted / Bewusst nicht übernommen
+- **TRACON-Flächen aus dem SimAware-TRACON-Project.** Gemessen am 03.11.2026:
+  Das Release-Asset (1,77 MB) liefert GitHub ohne CORS-Freigabe, der Browser
+  kann es also nicht laden; jsDelivr hat nur 1389 Einzeldateien (4,4 MB) ohne
+  Präfix-Index; es bliebe nur ein Abruf über den Server jeder VA. Daher bleibt
+  der grüne TRACON-Schild.
+  *TRACON areas from the SimAware TRACON Project are not adopted. Measured 03.11.2026: the release asset (1.77 MB) is served by GitHub without a CORS header, so browsers cannot load it; jsDelivr only has 1389 single files (4.4 MB) without a prefix index; the only way left would be a fetch through every VA's server. The green TRACON shield stays.*
+- **VATGlasses-Höhensektoren:** 28 MB, Lizenz CC BY-NC-SA, Fremddienst.
+  *VATGlasses altitude sectors: 28 MB, licence CC BY-NC-SA, third-party service.*
+
+### Added / Neu — Einstellungen (Admin → Live Map)
+- Lage der Flugtafel (oben / unten / aus), Datenquelle „Beide“, VA-Kennung (nur AeroACARS-Flüge dieser VA zeigen, z. B.
+  `gsg`; leer = alle), Hell/Dunkel/Auto, Mindest- und Höchsthöhe der Karte,
+  Rufzeichen neben den Flugzeugen ab Zoom 6 (an/aus).
+  *New settings: flight panel position (top / bottom / off), source "Both", VA prefix, light/dark/auto, min/max height, callsign labels.*
+
+### Changed / Geändert — Verwaltungsseite (Admin → Live Map)
+- **Neu geordnet und erklärt, nur Englisch** (öffentliches Modul): Statuszeile oben
+  (Flüge, Kartengrundlage, Wetter, ACARS-Live-Zeit), dann Flugdaten, Flugliste, Karte,
+  Kartengrundlage, Wetter, VATSIM/IVAO, Handys. Jede Einstellung hat einen kurzen Hilfetext,
+  der sagt, was sie auf der Karte wirklich tut; die AeroACARS-Felder erscheinen nur bei
+  Quelle AeroACARS oder Beide. Speichern-Leiste bleibt beim Scrollen sichtbar.
+  *Reordered and explained, English only: status row, seven sections, a short help text per
+  setting; AeroACARS fields only for that source; sticky save bar.*
+- **Farbe „Accent UI Color“ entfernt:** sie wirkte seit der Neugestaltung nirgends mehr
+  (`--lm-accent` ohne Verwender). „Primary UI Color“ heißt jetzt **Accent colour**;
+  sie und **Panel background** gelten nur im hellen Modus (dunkel feste Farben).
+  *Removed the unused "Accent UI Color"; "Primary UI Color" is now "Accent colour"; both
+  colours apply in light mode only.*
+- „Show mobile Flights button“ heißt **Show the flights list** (es gibt keinen Knopf; aus
+  blendet die Liste auf schmalen Bildschirmen aus). Hinweise: „Open the flights list at start“
+  wirkt nur bei Lage oben; von Netzwerk/Wetter öffnet beim Start nur eines.
+  *"Show mobile Flights button" is now "Show the flights list"; notes on what the mobile
+  start options really do.*
+
+### Fixed / Behoben — Verwaltungsseite
+- **Speichern ohne OpenWeatherMap-Schlüssel ging nicht**, solange der Wetter-Proxy an war
+  (Standard) — eine VA ohne Wetter konnte keine Einstellung ändern. Jetzt wird gespeichert,
+  die Karte zeigt dann einfach kein Wetter. Der Wetterstatus ist ohne Schlüssel „Off“
+  statt eines roten Alarms.
+  *Saving without an OpenWeatherMap key failed while the weather proxy was on (default).
+  It now saves and the map simply has no weather; the status shows "Off" instead of a red alert.*
+- Die Ablehnungsmeldung bei falschem CARTO-Schlüssel war deutsch, jetzt englisch.
+  *The CARTO key rejection message is now in English.*
+
+### Added / Neu — Farben (Admin → Live Map → Map)
+- **Akzentfarbe hell und dunkel einstellbar** (Thomas 04.11.2026: „Was ist, wenn man eine
+  grüne Seite hat?“). Neues Feld *Accent colour (dark mode)* (Standard `#7CB8F0` wie bisher).
+  Die Tönung von überfahrenen und gewählten Zeilen kommt jetzt aus dem Akzent statt aus festem
+  Blau (hell: kräftige Fassung des Akzents, damit Marineblau nicht grau tönt, GSG bleibt
+  gemessen wie vorher); die Schrift auf dem Akzent wird nach WCAG-Kontrast weiß oder dunkel.
+  Fest bleiben bewusst die Datenfarben: Phasen (wie die Webapp), Lotsenrollen, Route.
+  *Accent colour for light and dark mode; row tints and text on the accent follow it, so a
+  green site gets a green map. Phase, ATC and route colours stay as data colours.*
+- **AeroACARS Live / Beide als „German Sky Group only“ gekennzeichnet**: der Lese-Schlüssel
+  kommt nur von GSG, fremde VAs nutzen phpVMS.
+  *AeroACARS Live and Both are marked "German Sky Group only".*
+- **Dezente Signatur unter der Karte** für alle Besucher: „Crafted with ♥ in Germany by
+  Thomas Kant“ (ohne Spendenlink; der bleibt in der Verwaltung).
+  *A small credit line below the map, without the donation link.*
+
+### Changed / Geändert — Zugang zur Verwaltung
+- **Admin → Live Map für alle VA-Admins:** öffnet jetzt für jeden mit Zugang zum
+  Admin-Bereich (`ability:admin,admin-access`, wie der phpVMS-Kern), vorher nur Rolle `admin`.
+  *Admin → Live Map now opens for every user with admin panel access, not only the role "admin".*
+
+### Upgrade (FTP + phpVMS-Admin, ohne SSH)
+1. `LiveMap/` per FTP als `modules/LiveMap_new/` hochladen, dann umbenennen
+   (Schritte in INSTALL.txt). Erstinstallation: Admin → Modules → *Activate Module*.
+2. Die Theme-Datei `live_map.blade.php` in den Ordner `widgets/` **jedes benutzten
+   Themes** hochladen (`resources/views/layouts/<Theme>/widgets/`, Pfade für Seven,
+   SPTheme, Disposable_v3 und beta in INSTALL.txt).
+3. Die alten Dateien `live_map_scripts.blade.php` und `live_map_styles.blade.php`
+   im selben Ordner löschen (werden nicht mehr benutzt).
+4. Admin → Maintenance → *Clear all caches*.
+
+*Upgrade (FTP and phpVMS admin, no SSH): upload `LiveMap/` as `modules/LiveMap_new/`
+and rename it (see INSTALL.txt); upload `live_map.blade.php` into the `widgets/`
+folder of every theme in use; delete the old `live_map_scripts.blade.php` and
+`live_map_styles.blade.php` there; Admin → Maintenance → "Clear all caches".*
+
+---
+
 ## [5.0.0] — 2026-10-30
 
 AeroACARS 3.0, Pflichtenheft P-11.11 (A-75, N-12, F-020).

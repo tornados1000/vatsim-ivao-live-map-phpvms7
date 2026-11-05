@@ -31,21 +31,24 @@ class SettingsController extends Controller
     public function update(Request $request): RedirectResponse
     {
         $validated = $request->validate([
-            'layout_mode'             => 'required|in:modern,old_style',
+            'flights_panel'           => 'required|in:top,bottom,off',
             'default_basemap'         => 'required|in:positron,osm,dark,satellite',
             'weather_default_layer'   => 'required|in:none,clouds,radar,storms,wind,temp,combo',
             'weather_default_opacity' => 'required|numeric|min:0.2|max:1',
             'owm_api_key'             => 'nullable|string|max:128',
             'carto_api_key'           => 'nullable|string|max:128',
-            'flight_source'           => 'required|in:phpvms,aeroacars',
+            'flight_source'           => 'required|in:phpvms,aeroacars,beide',
+            'va_prefix'               => ['nullable', 'regex:/^[A-Za-z0-9_.\-]{0,20}$/'],
+            'theme_mode'              => 'nullable|in:auto,light,dark',
+            'min_height'              => 'nullable|integer|min:320|max:2000',
+            'max_height'              => 'nullable|integer|min:320|max:3000',
             'live_url'                => 'nullable|string|max:200',
             'live_key'                => 'nullable|string|max:256',
             'ui_primary_color'           => ['nullable', 'regex:/^#[0-9A-Fa-f]{6}$/'],
-            'ui_accent_color'            => ['nullable', 'regex:/^#[0-9A-Fa-f]{6}$/'],
             'color_box_background'       => ['nullable', 'regex:/^#[0-9A-Fa-f]{6}$/'],
+            'ui_accent_dark_color'       => ['nullable', 'regex:/^#[0-9A-Fa-f]{6}$/'],
         ]);
 
-        $proxyEnabled = $request->boolean('weather_proxy_enabled');
         $currentOwmApiKey = trim((string) $this->lmGet('acars.livemap_owm_api_key', env('LIVEMAP_OWM_API_KEY', '')));
         $submittedOwmApiKey = trim((string) ($validated['owm_api_key'] ?? ''));
         $clearOwmApiKey = $request->boolean('owm_api_key_clear');
@@ -53,11 +56,10 @@ class SettingsController extends Controller
             ? $submittedOwmApiKey
             : ($clearOwmApiKey ? '' : $currentOwmApiKey);
 
-        if ($proxyEnabled && $owmApiKey === '') {
-            return back()->withInput()->withErrors([
-                'owm_api_key' => 'OpenWeatherMap API key is required when weather proxy is enabled.',
-            ]);
-        }
+        // 5.1: Ohne Wetter-Schluessel wird trotzdem gespeichert. Das Widget
+        // schaltet das Wetter dann ab (widget.blade.php, $weatherAvailable);
+        // vorher liess sich bei eingeschaltetem Proxy (Standard) gar nichts
+        // speichern, solange kein Schluessel hinterlegt war.
 
         // CARTO-Schluessel — dieselbe Mechanik wie beim Wetter-Schluessel:
         // leer heisst "behalten", nur das Haekchen loescht.
@@ -118,14 +120,20 @@ class SettingsController extends Controller
         }
         $liveUrl = $liveUrlGeprueft;
 
-        $layoutMode = $validated['layout_mode'];
+        // 5.1: Lage der Flugtafel. Die beiden Altschluessel werden mitgeschrieben,
+        // damit aeltere Theme-Dateien und ein Rueckweg auf 4.7.x weiter stimmen.
+        $tafelLage = $validated['flights_panel'];
         $primaryColor = $this->normalizeHexColor($validated['ui_primary_color'] ?? '', '#1A2A4A');
-        $accentColor = $this->normalizeHexColor($validated['ui_accent_color'] ?? '', '#243B6A');
+        // 5.1: Die Akzentfarbe ist die Farbe oben (styles.blade.php --lm-akzent);
+        // der alte zweite Farbwert hat kein Feld mehr und bleibt, wie er ist.
+        $accentColor = $this->normalizeHexColor((string) $this->lmGet('acars.livemap_color_flights_header_end', '#243B6A'), '#243B6A');
         $boxBackgroundColor = $this->normalizeHexColor($validated['color_box_background'] ?? '', '#FFFFFF');
+        $accentDarkColor = $this->normalizeHexColor($validated['ui_accent_dark_color'] ?? '', '#7CB8F0');
 
         $payload = [
-            'acars.livemap_old_style'                   => $layoutMode === 'old_style',
-            'acars.livemap_show_top_flights_panel'      => $layoutMode === 'modern',
+            'acars.livemap_flights_panel'               => $tafelLage,
+            'acars.livemap_old_style'                   => $tafelLage === 'off',
+            'acars.livemap_show_top_flights_panel'      => $tafelLage === 'top',
             'acars.livemap_default_basemap'             => $validated['default_basemap'],
             'acars.livemap_show_basemap_switcher'       => $request->boolean('show_basemap_switcher'),
             'acars.livemap_enable_satellite'            => $request->boolean('enable_satellite'),
@@ -138,6 +146,11 @@ class SettingsController extends Controller
             'acars.livemap_quelle'                      => $validated['flight_source'],
             'acars.livemap_live_url'                    => $liveUrl,
             'acars.livemap_live_key'                    => $liveKey,
+            'acars.livemap_va_prefix'                   => strtolower(trim((string) ($validated['va_prefix'] ?? ''))),
+            'acars.livemap_theme_mode'                  => $validated['theme_mode'] ?? 'auto',
+            'acars.livemap_min_height'                  => (int) ($validated['min_height'] ?? 420),
+            'acars.livemap_max_height'                  => max((int) ($validated['min_height'] ?? 420), (int) ($validated['max_height'] ?? 1000)),
+            'acars.livemap_show_labels'                 => $request->boolean('show_labels'),
             'acars.livemap_show_network_box'          => $request->boolean('show_network_box'),
             'acars.livemap_default_network_vatsim'      => $request->boolean('default_network_vatsim'),
             'acars.livemap_default_network_ivao'        => $request->boolean('default_network_ivao'),
@@ -156,6 +169,7 @@ class SettingsController extends Controller
             'acars.livemap_color_box_background'        => $boxBackgroundColor,
             'acars.livemap_color_mobile_button'         => $primaryColor,
             'acars.livemap_color_mobile_button_active'  => $accentColor,
+            'acars.livemap_color_accent_dark'           => $accentDarkColor,
         ];
 
         foreach ($this->definitions() as $key => $definition) {
@@ -175,11 +189,40 @@ class SettingsController extends Controller
         return redirect('/admin/livemap')->with('status', $meldung);
     }
 
+    /**
+     * Tafel-Lage, solange `acars.livemap_flights_panel` fehlt. Fehlen auch beide
+     * 4.7.x-Schluessel (null/leer), ist es eine frische Installation → bottom
+     * (Standard seit 5.1, Thomas 04.11.2026). Sonst Update von 4.7.x: aus → off,
+     * sonst top, damit eine bestehende VA ihre gewohnte Lage behaelt.
+     */
+    public static function tafelLageAusAlt($oldStyle, $showTop): string
+    {
+        $fehlt = fn ($v) => $v === null || $v === '';
+        if ($fehlt($oldStyle) && $fehlt($showTop)) {
+            return 'bottom';
+        }
+        $an = fn ($v) => is_bool($v) ? $v : in_array(strtolower(trim((string) $v)), ['1', 'true', 'yes', 'on'], true);
+        if ($an($oldStyle) || ($showTop !== null && $showTop !== '' && !$an($showTop))) {
+            return 'off';
+        }
+
+        return 'top';
+    }
+
     private function currentSettings(): array
     {
         $values = [];
         foreach ($this->definitions() as $key => $definition) {
             $values[$key] = $this->lmGet($key, $definition['default'] ?? null);
+        }
+        // 5.1: Nach einem Update von 4.7.x fehlt die Tafel-Lage noch — aus den
+        // Altschluesseln ableiten, sonst zeigte die Seite „oben“ fuer eine
+        // Installation, die die Tafel ausgeschaltet hatte.
+        if ($this->lmGet('acars.livemap_flights_panel', null) === null) {
+            $values['acars.livemap_flights_panel'] = self::tafelLageAusAlt(
+                $this->lmGet('acars.livemap_old_style', null),
+                $this->lmGet('acars.livemap_show_top_flights_panel', null),
+            );
         }
 
         return $values;
@@ -238,9 +281,9 @@ class SettingsController extends Controller
             if (md5($mit->body()) === $referenz) {
                 return [
                     'valid'   => false,
-                    'message' => 'CARTO liefert mit diesem Schlüssel dieselbe Kachel wie ohne — '
-                        .'er wird also nicht angenommen. Bitte den Wert aus der CARTO-Mail prüfen '
-                        .'(Format: cb1_…). Die Karte trägt sonst weiterhin das Wasserzeichen.',
+                    'message' => 'CARTO returns the same tile with this key as without one, '
+                        .'so the key is not accepted. Please check the value from the CARTO e-mail '
+                        .'(format: cb1_…). Otherwise the map keeps the watermark.',
                 ];
             }
 
@@ -438,24 +481,25 @@ class SettingsController extends Controller
 
         $state = 'ok';
         $badgeClass = 'success';
-        $title = 'Weather Proxy OK';
-        $message = 'Proxy is active and no temporary upstream fallback is currently detected.';
+        $title = 'Working';
+        $message = 'Weather loads through this server.';
 
-        if (!$proxyEnabled) {
-            $state = 'disabled';
-            $badgeClass = 'info';
-            $title = 'Weather Proxy Disabled';
-            $message = 'Proxy is turned off in settings. Browser will call OpenWeather directly (key may be visible).';
-        } elseif (!$hasApiKey) {
+        // 5.1: Wetter ist freiwillig. Ohne Schluessel ist es aus, kein Fehler.
+        if (!$hasApiKey) {
             $state = 'missing_key';
-            $badgeClass = 'danger';
-            $title = 'API Key Missing';
-            $message = 'No OpenWeatherMap API key configured. Weather tiles cannot be loaded.';
+            $badgeClass = 'info';
+            $title = 'Off';
+            $message = 'No OpenWeatherMap key, so the map shows no weather.';
+        } elseif (!$proxyEnabled) {
+            $state = 'disabled';
+            $badgeClass = 'warning';
+            $title = 'Direct, without proxy';
+            $message = 'Weather loads straight from OpenWeatherMap; the key is visible in the browser.';
         } elseif ($fallbackActive) {
             $state = 'fallback';
             $badgeClass = 'warning';
-            $title = 'Fallback Active';
-            $message = 'OpenWeather upstream recently failed. Proxy serves blank tiles temporarily to prevent browser error spam.';
+            $title = 'Temporarily unavailable';
+            $message = 'OpenWeatherMap failed recently; blank tiles are served for a while instead of errors.';
         }
 
         return [
@@ -586,6 +630,12 @@ class SettingsController extends Controller
     private function definitions(): array
     {
         return [
+            'acars.livemap_flights_panel' => [
+                'name'        => 'Live Map: Flights Panel Position',
+                'description' => 'top = collapsible panel over the map, bottom = table below the map, off = hidden',
+                'type'        => 'string',
+                'default'     => 'bottom',
+            ],
             'acars.livemap_old_style' => [
                 'name'        => 'Live Map: Old Style',
                 'description' => 'Hide the top flights table overlay',
@@ -655,9 +705,40 @@ class SettingsController extends Controller
             // gespeichert — siehe Hinweis beim CARTO-Schluessel.
             'acars.livemap_quelle' => [
                 'name'        => 'Live Map: Flight Data Source',
-                'description' => 'phpvms = running PIREPs of this site, aeroacars = AeroACARS Live server',
+                'description' => 'phpvms = running PIREPs of this site, aeroacars = AeroACARS Live server, beide = both (AeroACARS first)',
                 'type'        => 'string',
                 'default'     => 'phpvms',
+            ],
+            // 5.1 — siehe Hinweis beim CARTO-Schluessel: ohne Eintrag hier wird nichts gespeichert.
+            'acars.livemap_va_prefix' => [
+                'name'        => 'Live Map: AeroACARS VA Prefix',
+                'description' => 'Only show AeroACARS Live flights of this VA (e.g. gsg); empty = all',
+                'type'        => 'string',
+                'default'     => '',
+            ],
+            'acars.livemap_theme_mode' => [
+                'name'        => 'Live Map: Light/Dark',
+                'description' => 'auto = follow the theme, light, dark',
+                'type'        => 'string',
+                'default'     => 'auto',
+            ],
+            'acars.livemap_min_height' => [
+                'name'        => 'Live Map: Minimum Height (px)',
+                'description' => 'The map fills the window below the page header, at least this high',
+                'type'        => 'int',
+                'default'     => 420,
+            ],
+            'acars.livemap_max_height' => [
+                'name'        => 'Live Map: Maximum Height (px)',
+                'description' => 'The map fills the window below the page header, at most this high',
+                'type'        => 'int',
+                'default'     => 1000,
+            ],
+            'acars.livemap_show_labels' => [
+                'name'        => 'Live Map: Callsign Labels',
+                'description' => 'Show the callsign next to each aircraft from zoom 6',
+                'type'        => 'bool',
+                'default'     => true,
             ],
             'acars.livemap_live_url' => [
                 'name'        => 'Live Map: AeroACARS Live URL',
@@ -790,6 +871,12 @@ class SettingsController extends Controller
                 'description' => 'Background color for active mobile Flights toggle button',
                 'type'        => 'string',
                 'default'     => '#243B6A',
+            ],
+            'acars.livemap_color_accent_dark' => [
+                'name'        => 'Live Map: Accent Colour (dark mode)',
+                'description' => 'Accent of the map in dark mode: active buttons, selected tab and flight, row tints',
+                'type'        => 'string',
+                'default'     => '#7CB8F0',
             ],
         ];
     }
@@ -992,6 +1079,11 @@ class SettingsController extends Controller
             return;
         }
 
+        // phpVMS cacht setting($key) unter dem Schluessel, wie er uebergeben
+        // wird ('settings.acars.livemap_…', helpers.php setting()). Nur die
+        // formatKey-Fassung ('settings.acars_livemap_…') zu loeschen liess den
+        // alten Wert bis zu 24 h stehen (BATC, 04.11.2026). Beide loeschen.
+        Cache::forget($cache['key'].$key);
         Cache::forget($cache['key'].Setting::formatKey($key));
     }
 }

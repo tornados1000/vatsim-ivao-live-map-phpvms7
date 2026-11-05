@@ -1,3 +1,157 @@
+## v5.1.1 - Settings are saved again on cached sites
+
+Release date: 2026-11-05
+
+---
+
+## English
+
+### Fixed
+
+* **Settings did not show up after saving** on sites that run phpVMS in production with a real cache (file, redis …): a ticked box came back after saving, a new OpenWeatherMap key seemed missing and the map showed no weather – for up to 24 hours or until the caches were cleared. phpVMS caches every setting under the key exactly as it is asked for; the module cleared a differently spelled key. Saving now clears the right one. Thanks to Disposable Hero for the report.
+
+### Update from 5.1.0 (FTP, no SSH)
+
+1. Upload the new `LiveMap/` as `<phpvms>/modules/LiveMap_new/`, rename the old `modules/LiveMap` to `LiveMap_old`, then `LiveMap_new` to `LiveMap`.
+2. The theme file `live_map.blade.php` stays as it is.
+3. Admin → Maintenance → *Clear all caches*.
+4. Admin → Live Map: open once, check your settings, click *Save Settings*.
+
+Install ZIP attached: `LiveMap-full-package-v5.1.1.zip`.
+
+---
+
+## Deutsch
+
+### Behoben
+
+* **Einstellungen wurden nach dem Speichern nicht übernommen** auf Seiten mit phpVMS im Produktionsmodus und echtem Cache (file, redis …): Ein abgewähltes Häkchen kam nach dem Speichern zurück, ein neuer OpenWeatherMap-Schlüssel schien zu fehlen und die Karte zeigte kein Wetter – bis zu 24 Stunden oder bis die Caches geleert wurden. phpVMS cacht jede Einstellung unter dem Schlüssel, so wie er abgefragt wird; das Modul löschte einen anders geschriebenen. Speichern löscht jetzt den richtigen. Danke an Disposable Hero für die Meldung.
+
+### Aktualisieren von 5.1.0 (FTP, ohne SSH)
+
+1. Das neue `LiveMap/` als `<phpvms>/modules/LiveMap_new/` hochladen, das alte `modules/LiveMap` in `LiveMap_old` umbenennen, dann `LiveMap_new` in `LiveMap`.
+2. Die Theme-Datei `live_map.blade.php` bleibt, wie sie ist.
+3. Admin → Maintenance → *Clear all caches*.
+4. Admin → Live Map einmal öffnen, Einstellungen prüfen, *Save Settings* klicken.
+
+Install-ZIP angehängt: `LiveMap-full-package-v5.1.1.zip`.
+
+**Full changelog:** https://github.com/MANFahrer-GF/vatsim-ivao-live-map-phpvms7/compare/v5.1.0...v5.1.1
+
+---
+
+## v5.1.0 - Live map: compact again, runs under any theme
+
+Release date: 2026-11-04
+
+---
+
+## English
+
+### What changed
+
+* **Compact look of 4.7.9, modernised:** flight board ("Active | Planned") with columns for flight, route, altitude, ground speed, distance to go with a progress bar, phase and pilot, and a detail box like the 4.7.9 crew pass with the airline logo. Flat surfaces with a hairline instead of gradient bars, the tools as one button group, tinted phase pills, popups readable in dark mode. The admin colour "flight list header" is now the accent colour. The 5.0 data path through the module stays.
+* **Sortable flight list:** click a column header to sort, click again to reverse. Default: phase in flight order (pre-flight to arrived), then distance to go; offline flights at the bottom; callsigns with numbers in natural order (GSG7 before GSG101). The choice is remembered in the browser.
+* **Logos, network dots, clicks:** a flight without a logo gets the logo of the phpVMS airline with the callsign's letters; without any logo the list shows the airline letters. Every on/off switch (VATSIM, IVAO, pilots, controllers, FIR sectors, weather) shows a green dot while it is on; on VATSIM/IVAO it also shows loading (grey) and a failed fetch (red). VA aircraft always sit above controller symbols, so clicking an aircraft opens its flight (a controller symbol could catch the click before). Zoom and tools also move clear of fixed theme bars nested deeper in the page (SPTheme header while scrolling).
+* **New source "Both":** AeroACARS Live and phpVMS together. The same pilot with the same callsign counts as one flight (registration, PIREP link and logo come from the PIREP). If one source fails, the other is shown with a notice.
+* **Aircraft symbols by class:** seven silhouettes (piston, turboprop, business jet, narrow-body, wide-body, four-engine, helicopter). The nose points in flight direction, aircraft on the ground are drawn smaller.
+* **Works under Seven, SPTheme and Disposable_v3:** the map brings its own Leaflet 1.9.4 (pinned, with integrity check) and no longer depends on the theme's Leaflet. Dark mode follows the theme (or is forced in the settings).
+* **The views now live inside the module.** The theme file `live_map.blade.php` is a single line; future updates only touch `modules/LiveMap`. `live_map_styles.blade.php` and `live_map_scripts.blade.php` are gone.
+* **Cleaner map:** VA aircraft sit on top of controller boxes, callsigns and network aircraft; stacked VA flights show as one symbol with "+n"; VATSIM and IVAO boxes of the same airport sit side by side; the IVAO box has a grey "IVAO" tag instead of an orange frame.
+* **Zooming ends "Follow"** (wheel, buttons, double click, keys, "+n").
+* **No overlapping controls** at any window size; below 760 px widget width the layout switches to one column.
+* **Height follows the window,** between a minimum and a maximum you set (default 420 / 1000 px).
+* **Without a CARTO key the default map is OpenStreetMap;** the CARTO styles are then not offered.
+* **Flight panel position** (new setting, replaces "Layout mode"): top (collapsible over the map), bottom (full-width list below the map, outside the map area, without a fold-out header; every flight is shown, the page grows) or off. Updating from 4.7.x without the new setting derives the position from the old keys (old style on, or top panel explicitly off = off, otherwise top); the old keys are still written.
+* **Detail box folds to its header row** when a box beside it does not fit (callsign ▾ opens it again); the narrow board shows no logos; the board header shows the live dot and the counts. Controller boxes and sector labels sit below the controls (board, zoom, tools), as in 4.7.9.
+* **VATSIM/IVAO controllers, the way VATSIM Radar does it:** voice-frequency gate 117–137 MHz (ATIS outside it and observers without a voice frequency do not count; an observer on a voice frequency at a real position shows with a grey "O"), controllers grouped by resolved facility (CLT_GND + KCLT_ATIS = one KCLT box), FIR assignment by longest prefix, sub-sectors, collective positions from [UIRs] and _FSS = oceanic area. IVAO sectors now also appear without VATSIM.
+* **More robust:** fetches have a timeout and are retried (large data files 5 minutes after a failure), sources come via jsDelivr (7-day browser cache), sector labels are nudged or hidden instead of overlapping.
+* **Not adopted:** TRACON areas from the SimAware TRACON Project (measured 03.11.2026: the 1.77 MB release asset has no CORS header on GitHub, jsDelivr only has 1389 single files / 4.4 MB without a prefix index; the only way left would be a fetch through every VA's server), so the green TRACON shield stays. Also not adopted: VATGlasses altitude sectors (28 MB, licence CC BY-NC-SA, third-party service).
+* **New settings** under Admin → Live Map: flight panel position, source "Both", VA prefix, light/dark/auto, minimum/maximum height, callsign labels on/off.
+* **Settings page tidied up (English only):** a status row on top, then seven clear sections with a short help text for every setting. The unused colour "Accent UI Color" is gone; "Primary UI Color" is now "Accent colour" (light mode only). "Show mobile Flights button" is now "Show the flights list".
+* **Fixed:** with the weather proxy on (default) the settings could not be saved without an OpenWeatherMap key. They now save, and the map simply has no weather.
+* **Your colours:** accent colour for light and dark mode; tabs, switches, selected and hovered rows follow it, so a green site gets a green map. Text on the accent turns white or dark automatically.
+* **AeroACARS Live is German Sky Group only:** it needs a read key that only German Sky Group has. Every other VA uses the source phpVMS.
+* A small credit line below the map: "Crafted with ♥ in Germany by Thomas Kant".
+* **Admin → Live Map for all VA admins:** the settings page now opens for every user with admin panel access (role "admin" or the permission "Admin Panel"), not only for the role "admin".
+
+### Install / upgrade (FTP and phpVMS admin, no SSH)
+
+The step-by-step guide is `INSTALL.txt` in the ZIP. In short:
+
+1. **Module:** upload `LiveMap/` with FTP as `<phpvms-root>/modules/LiveMap_new/`, check that the upload is complete, rename the old `modules/LiveMap` to `LiveMap_old`, then `LiveMap_new` to `LiveMap`. Never overwrite the live folder while the site runs. First install: Admin → Modules → *Activate Module*.
+2. **Theme file:** upload `live_map.blade.php` into the `widgets/` folder of **every theme you use** (active theme: Admin → Settings → General → *Current Theme*):
+   * Seven: `resources/views/layouts/seven/widgets/`
+   * SPTheme: `resources/views/layouts/SPTheme/widgets/`
+   * Disposable_v3: `resources/views/layouts/Disposable_v3/widgets/`
+   * default / beta: `resources/views/layouts/beta/widgets/`
+   * any other theme: `resources/views/layouts/<Theme>/widgets/` (create `widgets/` if missing)
+   
+   Then delete the old `live_map_scripts.blade.php` and `live_map_styles.blade.php` in that folder.
+3. **Caches:** Admin → Maintenance → *Clear all caches* (use "all", it also rebuilds a cached route list).
+4. **Settings:** Admin → Live Map, open once and save. Source *phpVMS*.
+5. **Check:** open `/livemap` and hard-refresh (`Ctrl+F5`) in every theme you uploaded to.
+
+A new install shows the flights list **below the map** (recommended). An update from 4.7.x keeps its layout (top, or off); switch to *Bottom* under Admin → Live Map → Flights list.
+
+Install ZIP attached: `LiveMap-full-package-v5.1.0.zip`.
+
+---
+
+## Deutsch
+
+### Was sich geändert hat
+
+* **Kompakt wie 4.7.9, moderner gestaltet:** Flugtafel („Aktiv | Geplant“) mit Spalten für Flug, Route, Höhe, GS, Rest-Strecke mit Fortschrittsbalken, Phase und Pilot, und ein Detailkasten wie der 4.7.9-Crew-Pass mit Airline-Logo. Flache Flächen mit Haarlinie statt Verlaufsbalken, die Werkzeuge als eine Knopfgruppe, getönte Phasen-Pillen, Popups im Dunkelmodus lesbar. Die Verwaltungsfarbe „Kopf der Flugliste“ ist jetzt die Akzentfarbe. Der Datenweg von 5.0 über das Modul bleibt.
+* **Sortierbare Flugliste:** Klick auf einen Spaltenkopf sortiert, ein zweiter Klick dreht um. Standard: Phase in Flugreihenfolge (Preflight bis Arrived), darin Rest-Strecke; Offline-Flüge unten; Rufzeichen mit Zahlen natürlich (GSG7 vor GSG101). Die Wahl merkt sich der Browser.
+* **Logos, Netz-Punkte, Klicks:** Ein Flug ohne Logo bekommt das Logo der phpVMS-Airline mit den Buchstaben des Rufzeichens; ganz ohne Logo zeigt die Liste die Airline-Buchstaben. Jeder Ein/Aus-Schalter (VATSIM, IVAO, Piloten, Lotsen, FIR-Sektoren, Wetter) zeigt einen grünen Punkt, solange er an ist; bei VATSIM/IVAO außerdem Laden (grau) und Abruffehler (rot). VA-Flieger liegen immer über Lotsen-Symbolen, ein Klick auf das Flugzeug öffnet also den Flug (vorher konnte ein Lotsen-Symbol den Klick abfangen). Zoom und Werkzeuge weichen auch tiefer verschachtelten festen Theme-Leisten aus (SPTheme-Kopf beim Scrollen).
+* **Neue Quelle „Beide“:** AeroACARS Live und phpVMS zusammen. Derselbe Pilot mit demselben Rufzeichen zählt als ein Flug (Registrierung, PIREP-Link und Logo kommen vom PIREP). Fällt eine Quelle aus, zeigt die Karte die andere mit einem Hinweis.
+* **Flugzeugsymbole nach Klasse:** sieben Silhouetten (Kolben, Turboprop, Bizjet, Schmalrumpf, Großraum, Vierstrahler, Hubschrauber). Die Nase zeigt in Flugrichtung, Flugzeuge am Boden sind kleiner.
+* **Läuft unter Seven, SPTheme und Disposable_v3:** Die Karte bringt ihr eigenes Leaflet 1.9.4 mit (gepinnt, mit Prüfsumme) und hängt nicht mehr am Leaflet des Themes. Der Dunkelmodus folgt dem Theme (oder wird in den Einstellungen festgelegt).
+* **Die Ansichten liegen jetzt im Modul.** Die Theme-Datei `live_map.blade.php` ist nur noch eine Zeile; künftige Updates betreffen nur `modules/LiveMap`. `live_map_styles.blade.php` und `live_map_scripts.blade.php` entfallen.
+* **Aufgeräumtere Karte:** VA-Flieger liegen vor Lotsenkasten, Rufzeichen und Netz-Fliegern; gestapelte VA-Flüge erscheinen als ein Symbol mit „+n“; VATSIM- und IVAO-Kasten desselben Flughafens stehen nebeneinander; der IVAO-Kasten hat statt des orangen Rahmens den grauen Zusatz „IVAO“.
+* **Zoomen beendet „Folgen“** (Mausrad, Knöpfe, Doppelklick, Tasten, „+n“).
+* **Keine Überlappungen** der Bedienelemente bei allen Fenstergrößen; unter 760 px Widget-Breite schaltet das Layout auf eine Spalte.
+* **Die Höhe folgt dem Fenster,** zwischen einer Mindest- und einer Höchsthöhe, die du einstellst (Standard 420 / 1000 px).
+* **Ohne CARTO-Schlüssel ist die Standardkarte OpenStreetMap;** die CARTO-Stile werden dann nicht angeboten.
+* **Lage der Flugtafel** (neue Einstellung, ersetzt den „Layout-Modus“): oben (aufklappbar über der Karte), unten (Liste unter der Karte, ganze Breite, außerhalb des Kartenbereichs, ohne Aufklapp-Kopf; alle Flüge werden gezeigt, die Seite wächst) oder aus. Beim Update von 4.7.x ohne die neue Einstellung wird die Lage aus den alten Schlüsseln abgeleitet (alter Stil an oder obere Tafel ausdrücklich aus = aus, sonst oben); die alten Schlüssel werden weiter mitgeschrieben.
+* **Der Detailkasten klappt auf seine Kopfzeile ein,** wenn daneben ein Kasten nicht passt (Rufzeichen ▾ klappt ihn wieder auf); die schmale Tafel zeigt keine Logos; der Tafelkopf zeigt Live-Punkt und Zahlen. Lotsenkästen und Sektor-Etiketten liegen unter den Bedienelementen (Tafel, Zoom, Werkzeuge), wie in 4.7.9.
+* **VATSIM/IVAO-Lotsen nach dem Verfahren von VATSIM Radar:** Sprechfunk-Riegel 117–137 MHz (ATIS außerhalb und Beobachter ohne Sprechfrequenz zählen nicht; ein Beobachter auf Sprechfrequenz an einem echten Platz erscheint mit grauem „O“), Lotsen nach aufgelöster Stelle gruppiert (CLT_GND + KCLT_ATIS = ein Kasten KCLT), FIR-Zuordnung nach längstem Präfix, Teilsektoren, Sammelpositionen aus [UIRs] und _FSS = ozeanische Fläche. IVAO-Sektoren erscheinen jetzt auch ohne VATSIM.
+* **Robuster:** Abrufe haben eine Zeitgrenze und werden neu versucht (große Datendateien 5 Minuten nach einem Fehlschlag), die Quellen kommen über jsDelivr (Browser-Puffer 7 Tage), Sektor-Etiketten werden gerückt oder ausgeblendet statt sich zu überlappen.
+* **Bewusst nicht übernommen:** TRACON-Flächen aus dem SimAware-TRACON-Project (gemessen am 03.11.2026: das Release-Asset von 1,77 MB hat bei GitHub keine CORS-Freigabe, jsDelivr hat nur 1389 Einzeldateien / 4,4 MB ohne Präfix-Index; es bliebe nur ein Abruf über den Server jeder VA), daher bleibt der grüne TRACON-Schild. Ebenfalls nicht: VATGlasses-Höhensektoren (28 MB, Lizenz CC BY-NC-SA, Fremddienst).
+* **Neue Einstellungen** unter Admin → Live Map: Lage der Flugtafel, Quelle „Beide“, VA-Kennung, Hell/Dunkel/Auto, Mindest-/Höchsthöhe, Rufzeichen an/aus.
+* **Verwaltungsseite aufgeräumt (nur Englisch):** oben eine Statuszeile, dann sieben klare Abschnitte mit einem kurzen Hilfetext je Einstellung. Die ungenutzte Farbe „Accent UI Color“ ist weg, „Primary UI Color“ heißt jetzt „Accent colour“ (nur hell). „Show mobile Flights button“ heißt jetzt „Show the flights list“.
+* **Behoben:** Bei eingeschaltetem Wetter-Proxy (Standard) ließen sich die Einstellungen ohne OpenWeatherMap-Schlüssel nicht speichern. Jetzt wird gespeichert, und die Karte zeigt einfach kein Wetter.
+* **Eigene Farben:** Akzentfarbe für hell und dunkel; Reiter, Schalter, gewählte und überfahrene Zeilen folgen ihr, eine grüne Seite bekommt also eine grüne Karte. Die Schrift auf dem Akzent wird automatisch weiß oder dunkel.
+* **AeroACARS Live nur für German Sky Group:** Der Lese-Schlüssel kommt nur von German Sky Group. Alle anderen VAs nutzen die Quelle phpVMS.
+* Eine dezente Signatur unter der Karte: „Crafted with ♥ in Germany by Thomas Kant“.
+* **Admin → Live Map für alle VA-Admins:** Die Einstellungsseite öffnet jetzt für jeden mit Zugang zum Admin-Bereich (Rolle „admin“ oder Recht „Admin Panel“), nicht mehr nur für die Rolle „admin“.
+
+### Installieren / aktualisieren (FTP und phpVMS-Admin, ohne SSH)
+
+Die Schritt-für-Schritt-Anleitung steht in `INSTALL.txt` im ZIP. Kurz:
+
+1. **Modul:** `LiveMap/` per FTP als `<phpvms-root>/modules/LiveMap_new/` hochladen, prüfen, ob alles angekommen ist, dann das alte `modules/LiveMap` in `LiveMap_old` umbenennen und `LiveMap_new` in `LiveMap`. Den laufenden Ordner nie direkt überschreiben. Erstinstallation: Admin → Modules → *Activate Module*.
+2. **Theme-Datei:** `live_map.blade.php` in den Ordner `widgets/` **jedes benutzten Themes** hochladen (aktives Theme: Admin → Settings → General → *Current Theme*):
+   * Seven: `resources/views/layouts/seven/widgets/`
+   * SPTheme: `resources/views/layouts/SPTheme/widgets/`
+   * Disposable_v3: `resources/views/layouts/Disposable_v3/widgets/`
+   * default / beta: `resources/views/layouts/beta/widgets/`
+   * jedes andere Theme: `resources/views/layouts/<Theme>/widgets/` (fehlt `widgets/`, anlegen)
+   
+   Danach im selben Ordner die alten Dateien `live_map_scripts.blade.php` und `live_map_styles.blade.php` löschen.
+3. **Caches:** Admin → Maintenance → *Clear all caches* („all“ nehmen, das baut auch eine gecachte Routenliste neu).
+4. **Einstellungen:** Admin → Live Map einmal öffnen und speichern. Quelle *phpVMS*.
+5. **Prüfen:** `/livemap` öffnen und hart neu laden (`Strg+F5`), in jedem Theme, in das hochgeladen wurde.
+
+Eine neue Installation zeigt die Flugliste **unter der Karte** (empfohlen). Ein Update von 4.7.x behält seine Lage (oben oder aus); umstellen unter Admin → Live Map → Flights list auf *Bottom*.
+
+Install-ZIP angehängt: `LiveMap-full-package-v5.1.0.zip`.
+
+**Full changelog:** https://github.com/MANFahrer-GF/vatsim-ivao-live-map-phpvms7/compare/v5.0.0...v5.1.0
+
+---
+
 ## v5.0.0 - Live map 3.0: data through the module, new layout
 
 Release date: 2026-10-30
