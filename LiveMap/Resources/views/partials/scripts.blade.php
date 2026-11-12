@@ -183,6 +183,56 @@
             var geflogen = Math.max(0, gesamt - rest);
             return { gesamt: gesamt, rest: rest, geflogen: geflogen, anteil: geflogen / gesamt };
         }
+        // ── ETA: jetzt + Rest / GS (Idee: Elisa, 12.11.2026) ──
+        // Grosskreis-Rest, also eine Schaetzung; Anzeige in UTC wie die
+        // Flugplanzeiten in phpVMS. Nur ab Reiseflug: im Startlauf und
+        // Steigflug ist die GS noch klein und die ETA Stunden zu spaet
+        // (Abnahme 5.2.0: 60 kt im Startlauf → 04:56z statt 19:09z).
+        var ETA_PHASEN = { CRUISE: 1, HOLDING: 1, DESCENT: 1, APPROACH: 1, FINAL: 1, LANDING: 1 };
+        var ETA_MIN_GS = 30;              // darunter keine sinnvolle Rechnung
+        var ETA_VERALTET_MS = 10 * 60000; // keine Meldung seit 10 min → keine ETA
+        function etaMinuten(rest, gs) {
+            if (rest == null || !isFinite(rest) || gs == null || !isFinite(gs) || gs < ETA_MIN_GS) return null;
+            return rest / gs * 60;
+        }
+        // ETA eines Flugs fuer die Tafel: '' wenn offline, veraltet, nicht im
+        // Reiseflug oder spaeter. `weg` = fortschritt(...) oder null.
+        // Rueckfall nur, wenn die Phase unbekannt ist (fremder ACARS-Client mit
+        // eigenem Status): Geradeausflug mit Reisegeschwindigkeit ueber 10 000 ft
+        // zaehlt als Reiseflug. Bekannte Start-/Steigphasen nie — auch nicht beim
+        // Abfangen im Steigflug (dort waere die GS noch klein, Abnahme 5.2.1).
+        function imGeradeausflug(f) {
+            var p = String(f.phase || '').toUpperCase(), pos = f.pos || {};
+            if (PHASE_LIST.indexOf(p) >= 0 || p === 'ON_BLOCK') return false;
+            return pos.gs_kt != null && pos.gs_kt >= 150 && pos.vs_fpm != null && isFinite(pos.vs_fpm) && Math.abs(pos.vs_fpm) <= 500
+                && pos.alt_ft != null && pos.alt_ft >= 10000;
+        }
+        // „Level" im Steigflug unter 5000 ft AGL: Die AeroACARS-Phasen-Engine schaltet
+        // dort nie auf Cruise (phase_v2.rs CRUISE_MIN_AGL_FT), ein VFR-Reiseflug (C172
+        // auf 2300 ft, GSG 1524 am 12.11.) bliebe sonst ohne ETA. Darueber wird aus
+        // „Level" nach 4–10 min von selbst Cruise; ein abfangender Jet bekommt seine
+        // ETA erst dann (sonst Stunden zu spaet bei langer Reststrecke).
+        function tieferReiseflug(f) {
+            var pos = f.pos || {}, agl = pos.agl_ft != null ? pos.agl_ft : pos.alt_ft;
+            return phaseForDisplay(f.phase, f.shadow_segment) === 'LEVEL' && String(f.phase).toUpperCase() === 'CLIMB'
+                && agl != null && agl < 5000 && pos.gs_kt != null && pos.gs_kt <= 180;
+        }
+        function etaMinutenFuerFlug(f, weg, jetztMs) {
+            if (!f || !weg || f.status === 'offline') return null;
+            if (f.last_seen && jetztMs - f.last_seen > ETA_VERALTET_MS) return null;
+            var reise = ETA_PHASEN[String(f.phase || '').toUpperCase()] || tieferReiseflug(f);
+            if (!reise && !imGeradeausflug(f)) return null;
+            return etaMinuten(weg.rest, f.pos ? f.pos.gs_kt : null);
+        }
+        function etaFuerFlug(f, weg, jetztMs) {
+            return etaMinutenFuerFlug(f, weg, jetztMs) == null ? '' : etaText(weg.rest, f.pos.gs_kt, jetztMs);
+        }
+        function etaText(rest, gs, jetztMs) {
+            var min = etaMinuten(rest, gs);
+            if (min == null) return '';
+            var d = new Date(jetztMs + min * 60000);
+            return ('0' + d.getUTCHours()).slice(-2) + ':' + ('0' + d.getUTCMinutes()).slice(-2) + 'z';
+        }
 
         // ── Flugzeugklassen (Form + Groesse des Symbols) ──
         // ICAO-Typ → Klasse nach der Doc-8643-Beschreibung (L1P/L2P, L2T,
@@ -221,6 +271,7 @@
         var SORT_WERT = {
             flug: function (f) { return f.callsign || f.id; },
             route: function (f) { return (f.dep || '') + ' ' + (f.arr || ''); },
+            typ: function (f) { return f.aircraft_icao; },
             hoehe: function (f) { return f.pos ? f.pos.alt_ft : null; },
             gs: function (f) { return f.pos ? f.pos.gs_kt : null; },
             pilot: function (f) { return f.pilot_name || f.pilot; },
@@ -255,6 +306,10 @@
                     if (Math.abs(c) === 2) return c;
                 } else if (schluessel === 'rest') {
                     c = stufe(vergleicheWert(rest(a), rest(b)));
+                } else if (schluessel === 'eta') {
+                    var jetzt = Date.now();
+                    var eta = function (f) { return etaMinutenFuerFlug(f, weg ? weg(f) : null, jetzt); };
+                    c = stufe(vergleicheWert(eta(a), eta(b)));
                 } else {
                     c = stufe(vergleicheWert((SORT_WERT[schluessel] || SORT_WERT.flug)(a), (SORT_WERT[schluessel] || SORT_WERT.flug)(b)));
                 }
@@ -368,6 +423,7 @@
             neben: neben, fortlaufend: fortlaufend, verschiebeNahe: verschiebeNahe,
             fehlerIstVoruebergehend: fehlerIstVoruebergehend, filterNachPhase: filterNachPhase, geplanteOhneAktive: geplanteOhneAktive, sortiereNach: sortiereNach, phasenRang: phasenRang,
             rufzeichenSchluessel: rufzeichenSchluessel, hoeheText: hoeheText, distanzNm: distanzNm, fortschritt: fortschritt,
+            etaMinuten: etaMinuten, etaText: etaText, etaFuerFlug: etaFuerFlug,
             KLASSEN: KLASSEN, flugzeugKlasse: flugzeugKlasse, klassenInfo: klassenInfo, amBoden: amBoden,
             aufSprechfrequenz: aufSprechfrequenz, vatspyLesen: vatspyLesen, firTreffer: firTreffer,
             grenzenFuerLotse: grenzenFuerLotse, firFlaeche: firFlaeche
@@ -1813,11 +1869,13 @@
                     b.innerHTML =
                         '<span class="lm3-flug">' + logoHtml(logoFuer(f), '', f.callsign) + '<b>' + lmEsc(f.callsign || (LM_T.pilot + ' ' + f.pilot)) + '</b></span>' +
                         '<span>' + lmEsc(f.dep || '?') + ' <span class="lm3-pfeil">›</span> ' + lmEsc(f.arr || '?') + '</span>' +
+                        '<span class="lm3-sp-typ">' + lmEsc(f.aircraft_icao || '') + '</span>' +
                         '<span class="lm3-sp-alt">' + lmEsc(LM3.hoeheText(pos.alt_ft, LM_SPRACHE)) + '</span>' +
                         '<span class="lm3-sp-gs">' + (pos.gs_kt != null ? Math.round(pos.gs_kt) : '') + '</span>' +
                         // Rest-Strecke und Fortschritt (Balken = geflogener Anteil)
                         '<span class="lm3-sp-dist">' + (w ? '<span class="lm3-rest">' + Math.round(w.rest) + ' nm</span>' +
                             '<i class="lm3-fort" aria-hidden="true"><i style="width:' + Math.round(w.anteil * 100) + '%"></i></i>' : '') + '</span>' +
+                        '<span class="lm3-sp-eta">' + lmEsc(LM3.etaFuerFlug(f, w, Date.now())) + '</span>' +
                         '<span class="lm3-sp-phase"><span class="lm3-pille">' + lmEsc(LM3.phaseLabel(phase)) + '</span></span>' +
                         '<span class="lm3-sp-pilot">' + lmEsc(f.pilot_name || '') + '</span>';
                     b.addEventListener('click', function () { waehle(f.id, true); });
@@ -2391,14 +2449,24 @@
                         if (r.height < window.innerHeight / 2) untenFest = Math.max(untenFest, r.height);
                         break;
                     }
-                    // Tafel unten: ihre Kopfzeile soll noch im Fenster stehen, damit man
-                    // sieht, dass unter der Karte die Flugliste kommt.
-                    var kopfUnten = wrap.classList.contains('lm3--tafel-unten') && document.getElementById('lm3-tafel-kopf');
-                    if (kopfUnten && kopfUnten.offsetParent !== null) untenFest += kopfUnten.getBoundingClientRect().height;
                     var h = window.innerHeight - Math.max(0, oben) - untenFest - 16;
+                    // Tafel unten: Karte und Tafel teilen sich das Fenster — wenige Fluege,
+                    // grosse Karte, die ganze Tafel steht im Fenster. Bei vielen Fluegen
+                    // behaelt die Karte mindestens 60 % und die Liste geht darunter weiter
+                    // (kein Rollbalken in der Tafel: der verschob unter Windows die Zeilen
+                    // gegen den Kopf, Abnahme 5.2.2).
+                    var unten = wrap.classList.contains('lm3--tafel-unten') && wrap.querySelector('.lm3-unten');
+                    if (unten && unten.offsetParent !== null) {
+                        var sig = wrap.querySelector('.lm3-signatur');
+                        var tafelH = unten.getBoundingClientRect().height + (sig ? sig.getBoundingClientRect().height : 0);
+                        h = Math.max(h - tafelH, h * 0.6);
+                    }
                     h = Math.max(cfg.minHoehe || 420, Math.min(cfg.maxHoehe || 1000, h));
-                    flaeche.style.height = Math.round(h) + 'px';
+                    var neu = Math.round(h) + 'px';
+                    var geaendert = flaeche.style.height !== neu;
+                    flaeche.style.height = neu;
                     messeObenFrei();
+                    return geaendert;
                 }
                 // Feste Leiste des Themes ueber der Kartenoberkante (Cookie-Hinweis oben bei
                 // Seven/Disposable, beim Scrollen die Navigationsleiste): Tafel, Zoom und
@@ -2659,7 +2727,9 @@
                 // Oben frei: beim Scrollen (feste Navigationsleiste) und wenn der Cookie-
                 // Hinweis nach dem Klick ausblendet (Klasse + Uebergang, kein childList).
                 var obenTimer = null;
-                function obenSpaeter() { clearTimeout(obenTimer); obenTimer = setTimeout(messeObenFrei, 120); }
+                // messeHoehe misst auch „oben frei" und rechnet die Hoehe neu, wenn eine
+                // feste Leiste unten (Cookie-Hinweis) verschwindet.
+                function obenSpaeter() { clearTimeout(obenTimer); obenTimer = setTimeout(function () { if (messeHoehe()) map.invalidateSize(); }, 120); }
                 window.addEventListener('scroll', obenSpaeter, { passive: true });
                 document.addEventListener('click', function () { setTimeout(obenSpaeter, 400); }, true);
                 document.addEventListener('transitionend', obenSpaeter, true);
@@ -2671,6 +2741,17 @@
                         clearTimeout(hoeheTimer);
                         hoeheTimer = setTimeout(function () { messeHoehe(); map.invalidateSize(); }, 300);
                     }).observe(document.body, { childList: true });
+                }
+                // Tafel unten: neue/weggefallene Fluege oder Reiterwechsel aendern ihre
+                // Hoehe → Karte neu aufteilen (nur das Stilattribut der Tafel selbst
+                // aendert sich durch messeHoehe, das beobachten wir nicht → keine Schleife).
+                var untenBox = wrap && wrap.classList.contains('lm3--tafel-unten') && wrap.querySelector('.lm3-unten');
+                if (window.MutationObserver && untenBox) {
+                    var untenTimer = null;
+                    new MutationObserver(function () {
+                        clearTimeout(untenTimer);
+                        untenTimer = setTimeout(function () { if (messeHoehe()) map.invalidateSize(); }, 150);
+                    }).observe(untenBox, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] });
                 }
             })();
         });

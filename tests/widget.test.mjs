@@ -301,3 +301,166 @@ test('Widget gruppiert Lotsen nach aufgeloester Stelle und laesst Beobachter ohn
   assert.match(skript, /if\(!window\.LM3\.aufSprechfrequenz\(a\.frequency\)\) return;/);
   assert.doesNotMatch(skript, /raw\.githubusercontent\.com\/vatsimnetwork/);
 });
+
+test('ETA-Rechnung: jetzt + Rest/GS in UTC, unter 30 kt leer', () => {
+  const alt = process.env.TZ;
+  process.env.TZ = 'Asia/Kolkata';                                 // UTC+5:30: Ortszeit waere sichtbar falsch
+  try {
+    const jetzt = Date.UTC(2026, 10, 12, 17, 40);
+    assert.equal(LM3.etaText(450, 450, jetzt), '18:40z');          // 450 nm bei 450 kt = 60 min
+    assert.equal(LM3.etaText(100, 30, jetzt), '21:00z');           // Schwelle zaehlt mit
+    assert.equal(LM3.etaText(100, 29, jetzt), '');
+    assert.equal(LM3.etaText(420, 420, Date.UTC(2026, 10, 12, 23, 30)), '00:30z'); // ueber Mitternacht
+    assert.equal(LM3.etaText(null, 400, jetzt), '');
+    assert.equal(LM3.etaText(100, NaN, jetzt), '');
+    assert.equal(LM3.etaMinuten(200, 400), 30);
+  } finally { if (alt === undefined) delete process.env.TZ; else process.env.TZ = alt; }
+});
+
+test('ETA je Flug: nur ab Reiseflug, nicht offline, nicht veraltet', () => {
+  const jetzt = Date.UTC(2026, 10, 12, 17, 40);
+  const weg = { rest: 676 };
+  const f = (phase, gs, extra, vs = 2000) => ({ phase, status: 'online', last_seen: jetzt - 5000, pos: { gs_kt: gs, vs_fpm: vs }, ...extra });
+  assert.equal(LM3.etaFuerFlug(f('CRUISE', 450), weg, jetzt), '19:10z');
+  for (const p of ['DESCENT', 'APPROACH', 'FINAL', 'LANDING', 'HOLDING', 'cruise']) assert.notEqual(LM3.etaFuerFlug(f(p, 300), weg, jetzt), '', p);
+  // Startlauf und Steigflug: GS noch klein, ETA waere Stunden zu spaet (Abnahme 5.2.0)
+  for (const p of ['TAKEOFF_ROLL', 'TAKEOFF', 'CLIMB', 'TAXI_OUT', 'BOARDING', 'TAXI_IN', null]) assert.equal(LM3.etaFuerFlug(f(p, 140), weg, jetzt), '', String(p));
+  assert.equal(LM3.etaFuerFlug(f('CRUISE', 450, { status: 'offline' }), weg, jetzt), '');
+  assert.equal(LM3.etaFuerFlug(f('CRUISE', 450, { last_seen: jetzt - 11 * 60000 }), weg, jetzt), '');   // Sim abgestuerzt, PIREP haengt
+  assert.equal(LM3.etaFuerFlug(f('CRUISE', 450, { last_seen: jetzt - 9 * 60000 }), weg, jetzt), '19:10z');
+  assert.equal(LM3.etaFuerFlug(f('CRUISE', 450, { last_seen: null }), weg, jetzt), '19:10z');            // ohne Zeitstempel nicht verwerfen
+  assert.equal(LM3.etaFuerFlug(f('CRUISE', 450), null, jetzt), '');
+  // Rueckfall nur bei unbekannter Phase (fremder Client): Geradeausflug, >= 150 kt, >= 10 000 ft
+  const g = (phase, gs, vs, alt) => ({ phase, status: 'online', last_seen: jetzt - 5000, pos: { gs_kt: gs, vs_fpm: vs, alt_ft: alt } });
+  assert.equal(LM3.etaFuerFlug(g(null, 450, -300, 36000), weg, jetzt), '19:10z');
+  assert.equal(LM3.etaFuerFlug(g('XYZ', 450, 0, 36000), weg, jetzt), '19:10z');
+  assert.equal(LM3.etaFuerFlug(g(null, 160, 0, 300), weg, jetzt), '');               // Startlauf ohne Phase: zu tief
+  assert.equal(LM3.etaFuerFlug(g(null, 140, 0, 36000), weg, jetzt), '');             // zu langsam
+  assert.equal(LM3.etaFuerFlug(g(null, 450, 1500, 36000), weg, jetzt), '');          // steigt
+  assert.equal(LM3.etaFuerFlug(g(null, 450, null, 36000), weg, jetzt), '');          // ohne V/S kein Rueckfall
+  // Bekannte Start-/Steigphasen nie, auch im Waagerechtflug (Abfangen im Steigflug, phpVMS TOF → TAKEOFF)
+  for (const p of ['CLIMB', 'TAKEOFF', 'TAKEOFF_ROLL', 'TAXI_OUT', 'TAXI_IN', 'BLOCKS_ON', 'ON_BLOCK'])
+    assert.equal(LM3.etaFuerFlug(g(p, 280, 0, 12000), weg, jetzt), '', p);
+  assert.equal(LM3.etaFuerFlug(f('CRUISE', 450, { pos: null }), weg, jetzt), '');
+  // Anzeige „Level" (Steig-/Sinkphase, Phasen-Engine meldet Geradeausflug): stabile GS,
+  // also ETA. GSG 1524 am 12.11.: C172 BGJN→BGAA auf 2300 ft blieb in CLIMB/level.
+  const lv = (phase, seg) => ({ phase, shadow_segment: seg, status: 'online', last_seen: jetzt - 5000, pos: { gs_kt: 106, vs_fpm: 7, alt_ft: 2283 } });
+  assert.equal(LM3.etaFuerFlug({ ...lv('CLIMB', 'level') }, { rest: 38 }, jetzt), '18:01z');
+  assert.equal(LM3.etaFuerFlug(lv('CLIMB', 'climbing'), { rest: 38 }, jetzt), '');
+  assert.equal(LM3.etaFuerFlug(lv('CLIMB', null), { rest: 38 }, jetzt), '');
+  assert.equal(LM3.etaFuerFlug(lv('TAKEOFF', 'level'), { rest: 38 }, jetzt), '');   // nur Steig-/Sinkphase wird „Level"
+  // Jet faengt im Steigflug ab: keine ETA (waere bei langer Reststrecke Stunden zu spaet);
+  // ueber 5000 ft AGL wird daraus nach 4–10 min von selbst Cruise.
+  const jet = (alt, gs, agl) => ({ phase: 'CLIMB', shadow_segment: 'level', status: 'online', last_seen: jetzt - 5000, pos: { gs_kt: gs, vs_fpm: 0, alt_ft: alt, agl_ft: agl } });
+  assert.equal(LM3.etaFuerFlug(jet(10000, 290), { rest: 3300 }, jetzt), '');
+  assert.equal(LM3.etaFuerFlug(jet(3000, 210), { rest: 580 }, jetzt), '');            // tief, aber schnell
+  assert.equal(LM3.etaFuerFlug(jet(6500, 150, 6000), { rest: 40 }, jetzt), '');       // langsam, aber ueber 5000 ft AGL
+  assert.equal(LM3.etaFuerFlug(jet(5500, 110, 2100), { rest: 38 }, jetzt), '18:00z'); // hoher Platz: AGL zaehlt
+});
+
+test('Tafel-Raster: jede Stufe passt in die Breite, ab der sie gilt', () => {
+  // Mindestbreite = feste/Mindest-px der Spalten + 6 px Spaltenabstand + 28 px
+  // Zeilen-Innenabstand + 2 px Rahmen. Abnahme 5.2.0: Typ/ETA machten die Tafel
+  // breiter als die Stufe, Pilot/Phase wurden abgeschnitten.
+  const css = fs.readFileSync(path.join(HIER, '..', 'LiveMap', 'Resources', 'views', 'partials', 'styles.blade.php'), 'utf8');
+  const spalten = (sp) => sp.split(/\s+(?![^()]*\))/).filter(Boolean);
+  const mindest = (sp) => {
+    const t = spalten(sp);
+    const px = t.reduce((s, x) => { const m = x.match(/^(?:minmax\()?(\d+)px/); return s + (m ? +m[1] : 0); }, 0);
+    return px + 6 * (t.length - 1) + 28 + 2;
+  };
+  const stufen = [...css.matchAll(/@container lmmitte \(max-width: (\d+)px\)\s*\{([\s\S]*?)\n\s*\}\n/g)]
+    .map((m) => ({ max: +m[1], sp: (m[2].match(/--lm-sp:\s*([^;]+);/) || [])[1] }));
+  assert.ok(stufen.length >= 3, 'Stufen nicht gefunden');
+  const voll = [...css.matchAll(/^\s*--lm-sp:\s*([^;]+);/gm)].map((m) => m[1]);   // oben und unten, ausserhalb der Stufen
+  assert.equal(voll.length, 2);
+  for (const sp of voll) assert.ok(mindest(sp) <= stufen[0].max + 1, 'volles Raster ' + mindest(sp) + ' px > ' + (stufen[0].max + 1));
+  // Tafel unten ab 1000 px (5.2.2): eigenes Raster mit Mindestbreiten fuer lange Namen
+  const breit = css.match(/@container lmmitte \(min-width: (\d+)px\)\s*\{[\s\S]*?--lm-sp:\s*([^;]+);/);
+  assert.ok(breit, 'Raster ab 1000 px nicht gefunden');
+  assert.equal(spalten(breit[2]).length, 9, 'Raster ab ' + breit[1] + ' px: 9 Spalten');
+  assert.ok(mindest(breit[2]) <= +breit[1], 'Raster ab ' + breit[1] + ' px braucht ' + mindest(breit[2]) + ' px');
+  // Neue Spalten (5.2) fallen zuerst: wo Pilot/Rest/Hoehe/GS fehlen, fehlen auch
+  // Typ und ETA; Pilot faellt nicht frueher als in 5.1.1 (Stufe 720 px).
+  const versteckt = (m) => new Set([...m.matchAll(/\.lm3-sp-(\w+)/g)].map((x) => x[1]));
+  const bloecke = [...css.matchAll(/@container lmmitte \(max-width: (\d+)px\)\s*\{([\s\S]*?)\n\s*\}\n/g)];
+  for (const [, max, inhalt] of bloecke) {
+    const weg = versteckt(inhalt.split('\n').filter((z) => z.includes('display: none') && z.includes('.lm3-tafel')).join(' '));
+    if (['pilot', 'dist', 'alt', 'gs'].some((k) => weg.has(k))) assert.ok(weg.has('typ') && weg.has('eta'), 'Stufe ' + max + ' versteckt alte Spalten vor Typ/ETA');
+    if (weg.has('pilot')) assert.ok(+max <= 720, 'Pilot faellt schon bei ' + max + ' px (5.1.1: 720)');
+    assert.equal(spalten(stufen.find((x) => x.max === +max).sp).length, 9 - weg.size, 'Stufe ' + max + ': Raster und sichtbare Spalten');
+  }
+  for (let i = 0; i < stufen.length - 1; i++) {
+    assert.ok(stufen[i].sp, 'Stufe ' + stufen[i].max + ' ohne Raster');
+    assert.ok(mindest(stufen[i].sp) <= stufen[i + 1].max + 1, 'Stufe ' + stufen[i].max + ': ' + mindest(stufen[i].sp) + ' px > ' + (stufen[i + 1].max + 1));
+  }
+});
+
+test('Tafel unten: Raster ab 1000 px trifft nur unten, Zeilen ohne eigenen Rollbalken', () => {
+  // Abnahme 5.2.2: das breite Raster und die 15-px-Schrift gelten nur fuer die
+  // Lage unten; ein innerer Rollbalken (15a5bc4) verschob unter Windows die
+  // Zeilen gegen den Kopf.
+  const css = fs.readFileSync(path.join(HIER, '..', 'LiveMap', 'Resources', 'views', 'partials', 'styles.blade.php'), 'utf8');
+  const block = css.match(/@container lmmitte \(min-width: \d+px\)\s*\{([\s\S]*?)\n\s*\}\n/);
+  assert.ok(block, 'Block ab 1000 px nicht gefunden');
+  const selektoren = [...block[1].matchAll(/^\s*([^{}\n]+?)\s*\{/gm)].map((m) => m[1]);
+  assert.ok(selektoren.length >= 4, 'Regeln im Block nicht gefunden');
+  for (const s of selektoren) for (const teil of s.split(',')) assert.match(teil.trim(), /^\.lm3-unten\s/, 'Regel ab 1000 px ausserhalb der Tafel unten: ' + teil.trim());
+  const grund = css.match(/^\s*\.lm3-unten \.lm3-zeilen\s*\{([^}]*)\}/m);
+  assert.ok(grund, '.lm3-unten .lm3-zeilen nicht gefunden');
+  assert.match(grund[1], /overflow:\s*visible/, 'Zeilen unten muessen overflow: visible haben');
+  for (const r of [...css.matchAll(/\.lm3-unten \.lm3-zeilen\s*\{([^}]*)\}/g)].map((m) => m[1])) {
+    assert.doesNotMatch(r, /overflow(-y)?:\s*(auto|scroll)/, 'Zeilen unten mit eigenem Rollbalken');
+    assert.match(r, /max-height:\s*none/, 'Zeilen unten mit Hoehendeckel');
+  }
+});
+
+test('Sortierung nach ETA und Typ: fehlende Werte hinten', () => {
+  const dep = { lat: 50, lon: 8 }, arr = { lat: 52, lon: 13 };
+  const f = (id, gs, lat, typ) => ({ id, callsign: id, aircraft_icao: typ, phase: 'CRUISE', pos: { lat, lon: 10, gs_kt: gs } });
+  const weg = (x) => LM3.fortschritt(dep, arr, x.pos);
+  // C (450 kt, ~160 nm) kommt vor B (300 kt, ~130 nm); A steht
+  const liste = [f('A', 0, 50.5, 'B738'), f('B', 300, 51, 'A320'), f('C', 450, 50.2, null),
+    { ...f('D', 480, 50.1, 'A333'), phase: 'CLIMB' }];   // D: schnellste Rechnung, aber Steigflug → keine ETA, hinten
+  assert.deepEqual(LM3.sortiereNach(liste, 'eta', 'auf', weg).map((x) => x.id), ['C', 'B', 'A', 'D']);
+  assert.deepEqual(LM3.sortiereNach(liste, 'eta', 'ab', weg).map((x) => x.id), ['B', 'C', 'A', 'D']);
+  assert.deepEqual(LM3.sortiereNach(liste, 'typ', 'auf', weg).map((x) => x.id), ['B', 'D', 'A', 'C']);
+});
+
+test('Tafelzeile: echte zeileAktiv liefert die Zellen in Kopf-Reihenfolge, ETA nach Regel', () => {
+  const start = skript.indexOf('function zeileAktiv(f) {');
+  const ende = skript.indexOf('function zeileGeplant(', start);
+  assert.ok(start > 0 && ende > start, 'zeileAktiv nicht gefunden');
+  const jetzt = Date.now();
+  const knoten = () => ({ style: { setProperty() {} }, setAttribute() {}, addEventListener() {}, innerHTML: '' });
+  const ctx = {
+    LM3, LM_SPRACHE: 'de', LM_T: { pilot: 'Pilot' }, zustand: { auswahl: null }, waehle() {},
+    document: { createElement: knoten },
+    logoFuer: () => null, logoHtml: () => '',
+    weg: (f) => LM3.fortschritt({ lat: 50, lon: 8 }, { lat: 41, lon: 2 }, f.pos),
+    Date,
+  };
+  const esc = skript.slice(skript.indexOf('function lmEsc(s) {'), skript.indexOf('function lmKurzname('));
+  vm.runInNewContext(esc + skript.slice(start, ende) + '; this.zeileAktiv = zeileAktiv;', ctx);
+  const zeile = (phase, extra) => ctx.zeileAktiv({ id: 'x', callsign: 'GSG1', dep: 'EDDF', arr: 'LEBL', aircraft_icao: 'A20N', pilot_name: 'Max S.',
+    phase, status: 'online', last_seen: jetzt - 5000, pos: { lat: 48, lon: 6, alt_ft: 36000, gs_kt: 450, vs_fpm: 0 }, ...extra }).innerHTML;
+
+  // Spalten der Zeile (oberste Ebene) gegen die Spaltenkoepfe aus tafel.blade.php
+  const tafel = fs.readFileSync(path.join(HIER, '..', 'LiveMap', 'Resources', 'views', 'partials', 'tafel.blade.php'), 'utf8');
+  const kopfBlock = tafel.slice(tafel.indexOf('id="lm3-kopf-aktiv"'), tafel.indexOf('id="lm3-kopf-geplant"'));
+  const kopf = [...kopfBlock.matchAll(/class="lm3-th(?: (lm3-sp-\w+))?" data-sort="(\w+)"/g)].map((m) => m[1] || '');
+  const oben = (html) => { const out = []; let tiefe = 0; for (const m of html.matchAll(/<(\/?)span(?: class="([^"]*)")?[^>]*>/g)) { if (m[1]) tiefe--; else { if (tiefe === 0) out.push((m[2] || '').split(' ').find((k) => k.startsWith('lm3-sp-')) || ''); tiefe++; } } return out; };
+  const html = zeile('CRUISE');
+  assert.deepEqual(oben(html), kopf, 'Zellen der Zeile = Spaltenkoepfe');
+  const css = fs.readFileSync(path.join(HIER, '..', 'LiveMap', 'Resources', 'views', 'partials', 'styles.blade.php'), 'utf8');
+  for (const sp of [...css.matchAll(/^\s*--lm-sp:\s*([^;]+);/gm), ...css.matchAll(/@container lmmitte \(min-width: \d+px\)\s*\{[\s\S]*?--lm-sp:\s*([^;]+);/g)].map((m) => m[1]))
+    assert.equal(sp.split(/\s+(?![^()]*\))/).length, kopf.length, 'volles Raster = Spaltenzahl');
+
+  const zelle = (h, k) => { const m = h.match(new RegExp('<span class="' + k + '">([^<]*)</span>')); return m ? m[1] : null; };
+  assert.equal(zelle(html, 'lm3-sp-typ'), 'A20N');
+  assert.match(zelle(html, 'lm3-sp-eta'), /^\d\d:\d\dz$/);
+  assert.equal(zelle(zeile('CLIMB'), 'lm3-sp-eta'), '');
+  assert.equal(zelle(zeile('CRUISE', { status: 'offline' }), 'lm3-sp-eta'), '');
+  assert.equal(zelle(zeile('CRUISE', { last_seen: jetzt - 11 * 60000 }), 'lm3-sp-eta'), '');
+  assert.equal(zelle(zeile('CRUISE', { aircraft_icao: '<b>' }), 'lm3-sp-typ'), '&lt;b&gt;');   // escaped
+});

@@ -99,7 +99,7 @@
                         width: max-content; min-width: 0;
                         border-radius: var(--lm-r); box-shadow: var(--lm-schatten); overflow: hidden;
                         background: var(--lm-flaeche); border: 1px solid var(--lm-linie);
-                        --lm-sp: 148px 104px 60px 44px 110px 92px minmax(72px, 1fr);
+                        --lm-sp: 148px 104px 46px 60px 44px 110px 50px 92px minmax(72px, 1fr);
                     }
                     /* Lage „aus“: das Skript setzt hidden; display:flex oben darf es nicht ueberstimmen */
                     .lm3 .lm3-tafel[hidden] { display: none !important; }
@@ -200,28 +200,48 @@
                     .lm3-unten { container-type: inline-size; container-name: lmmitte; border-top: 1px solid var(--lm-linie); background: var(--lm-flaeche); }
                     .lm3-unten .lm3-tafel {
                         width: 100%; max-width: none; max-height: none; border-radius: 0; box-shadow: none; border: 0; background: transparent;
-                        --lm-sp: minmax(150px, 1.4fr) minmax(110px, 1fr) 70px 54px 124px 120px minmax(100px, 1.2fr);
+                        --lm-sp: minmax(148px, 1.4fr) minmax(104px, 1fr) 46px 60px 44px 110px 50px 92px minmax(72px, 1.2fr);
                     }
                     .lm3-unten .lm3-reiter { padding: 8px 10px; }
                     .lm3-unten .lm3-thead { background: var(--lm-flaeche-2); }
                     .lm3-unten .lm3-g-plan { grid-template-columns: minmax(150px, 1.4fr) minmax(110px, 1fr) 96px minmax(100px, 1.2fr); }
                     .lm3-unten .lm3-zeilen { max-height: none; overflow: visible; }
+                    /* Unten mit Platz: groessere Schrift, Textspalten mit Mindestbreiten fuer
+                       lange Namen/Routen bei 15 px (Abnahme 5.2.2), Rest gewichtet verteilt —
+                       sonst schluckt eine Spalte den ganzen Platz. Summe der Minima 856 px
+                       + 8 x 6 px Abstand + 28 px Innenabstand = 932 <= 1000. */
+                    @container lmmitte (min-width: 1000px) {
+                        .lm3-unten .lm3-tafel { --lm-sp: minmax(148px, 1.2fr) minmax(124px, 1fr) minmax(52px, .6fr) minmax(72px, .7fr) minmax(48px, .6fr) minmax(116px, 1fr) minmax(60px, .6fr) minmax(104px, .9fr) minmax(132px, 1.2fr); }
+                        .lm3-unten .lm3-zeile { font-size: 15px; }
+                        .lm3-unten .lm3-thead { font-size: 12px; }
+                        .lm3-unten .lm3-pille { font-size: 13px; }
+                    }
 
                     /* Tafel gibt Spalten ab, statt ueber die rechte Spalte zu wachsen
                        (Selektoren mit .lm3 davor, damit sie auch die Tafel unten treffen) */
+                    /* Zuerst fallen die neuen Spalten (5.2): Typ, dann ETA. Ab 720 px
+                       wieder genau die Stufen von 5.1.1. */
+                    @container lmmitte (max-width: 803px) {
+                        .lm3 .lm3-tafel { --lm-sp: 148px 104px 60px 44px 110px 50px 92px minmax(72px, 1fr); }
+                        .lm3 .lm3-tafel .lm3-sp-typ { display: none !important; }
+                    }
+                    @container lmmitte (max-width: 751px) {
+                        .lm3 .lm3-tafel { --lm-sp: 148px 104px 60px 44px 110px 92px minmax(72px, 1fr); }
+                        .lm3 .lm3-tafel .lm3-sp-typ, .lm3 .lm3-tafel .lm3-sp-eta { display: none !important; }
+                    }
                     @container lmmitte (max-width: 720px) {
                         .lm3 .lm3-tafel { --lm-sp: 140px 100px 60px 44px 110px minmax(80px, 1fr); }
-                        .lm3 .lm3-tafel .lm3-sp-pilot { display: none; }
+                        .lm3 .lm3-tafel .lm3-sp-pilot, .lm3 .lm3-tafel .lm3-sp-typ, .lm3 .lm3-tafel .lm3-sp-eta { display: none !important; }
                     }
                     @container lmmitte (max-width: 600px) {
                         .lm3 .lm3-tafel { --lm-sp: 140px 100px 60px 44px minmax(80px, 1fr); }
-                        .lm3 .lm3-tafel .lm3-sp-pilot, .lm3-tafel .lm3-sp-dist { display: none !important; }
+                        .lm3 .lm3-tafel .lm3-sp-pilot, .lm3-tafel .lm3-sp-dist, .lm3-tafel .lm3-sp-typ, .lm3-tafel .lm3-sp-eta { display: none !important; }
                         .lm3 .lm3-g-plan { grid-template-columns: 140px 100px minmax(60px, 1fr); }
                         .lm3 .lm3-g-plan .lm3-sp-pilot { display: none; }
                     }
                     @container lmmitte (max-width: 480px) {
                         .lm3 .lm3-tafel { --lm-sp: minmax(0, 1fr) 96px minmax(70px, 96px); }
-                        .lm3 .lm3-tafel .lm3-sp-pilot, .lm3-tafel .lm3-sp-dist, .lm3-tafel .lm3-sp-alt, .lm3-tafel .lm3-sp-gs { display: none !important; }
+                        .lm3 .lm3-tafel .lm3-sp-pilot, .lm3-tafel .lm3-sp-dist, .lm3-tafel .lm3-sp-alt, .lm3-tafel .lm3-sp-gs, .lm3-tafel .lm3-sp-typ, .lm3-tafel .lm3-sp-eta { display: none !important; }
                         .lm3 .lm3-g-plan { grid-template-columns: minmax(0, 1fr) 96px; }
                         .lm3 .lm3-g-plan .lm3-sp-zeit { display: none; }
                         .lm3 .lm3-tafel-kopf { gap: 10px; padding: 9px 12px; }

@@ -4,6 +4,62 @@ All notable changes to this project are documented in this file.
 
 ---
 
+## [5.2.2] — 2026-11-12
+
+### Changed / Geändert
+- **Flugtafel unten mit Platz (ab 1000 px):** Spalten gleichmäßiger verteilt, Pilotennamen und
+  Routen behalten Mindestbreiten; Schrift größer (Zeilen 15 px, Kopf 12 px). Darunter wie 5.2.1.
+  *Bottom flight board: columns spread evenly, larger font from 1000 px.*
+- **Kartenhöhe passt sich der Tafel an:** Bei wenigen Flügen wächst die Karte bis zum
+  Fensterrand, bei vielen behält sie mindestens 60 % der Höhe, die Liste ist per Seitenscrollen
+  erreichbar (Admin-Grenzen gelten weiter). Kein eigener Rollbalken in der Tafel.
+  *Map grows when few flights are listed.*
+
+### Fixed / Behoben
+- **ETA bei „Level“ in niedriger Höhe:** Kleine Flugzeuge, die unter 5000 ft über Grund mit
+  höchstens 180 kt geradeaus fliegen, zeigt der ACARS-Client dauerhaft als „Level“ statt Cruise.
+  Sie bekommen jetzt eine ETA. Jets im Zwischenabfangen weiterhin nicht. *ETA for low, slow
+  level flight.*
+
+### Upgrade
+Nur `modules/LiveMap` tauschen. *Only replace `modules/LiveMap`.*
+
+---
+
+## [5.2.1] — 2026-11-12
+
+### Fixed / Behoben
+- **Tafel abgeschnitten:** In einigen Fensterbreiten war die Flugtafel breiter als ihr Platz,
+  „Pilot“ oder „Phase“ wurden rechts abgeschnitten. Die Tafel gibt jetzt rechtzeitig Spalten
+  ab: zuerst „Typ“, dann „ETA“; darunter genau wie 5.1.1. Ein Test rechnet jede Stufe gegen
+  ihre Breite. *Flight board no longer cut off; Type, then ETA are dropped first.*
+- **ETA erst ab Reiseflug** (Cruise, Holding, Descent, Approach, Final, Landing) oder im
+  Geradeausflug mit Reisegeschwindigkeit über 10 000 ft, wenn der ACARS-Client eine unbekannte Phase meldet. Im
+  Startlauf und Steigflug lag sie Stunden zu spät. *ETA from cruise onwards.*
+- **Keine ETA ohne Meldung seit 10 Minuten.** Bei Quelle phpVMS kommt „zuletzt gesehen“ jetzt
+  aus der letzten Position, nicht aus dem PIREP. *No ETA for flights silent for 10 minutes.*
+
+### Upgrade
+Nur `modules/LiveMap` tauschen, die Theme-Datei bleibt. *Only replace `modules/LiveMap`.*
+
+---
+
+## [5.2.0] — 2026-11-12
+
+### Added / Neu
+- **Spalten „Typ“ und „ETA“ in der Flugtafel** (Wunsch von Elisa): Typ aus dem ICAO-Code des
+  Flugzeugs, ETA = jetzt + Reststrecke / Geschwindigkeit über Grund, in UTC („17:30z“);
+  Schwelle seit 5.2.1: ab Reiseflug. Großkreis-Rest, also eine Schätzung; offline leer. Beide Spalten
+  sortierbar; schmale Tafel gibt zuerst „Typ“ ab, ganz schmal auch „ETA“.
+  *New flight board columns Type and ETA (now + distance to go / ground speed, from 50 kt,
+  UTC). Both sortable; narrow boards drop Type first, very narrow ones ETA too.*
+
+### Upgrade
+Nur `modules/LiveMap` tauschen (FTP, siehe INSTALL.txt), die Theme-Datei bleibt.
+*Only replace `modules/LiveMap`; the theme file stays.*
+
+---
+
 ## [5.1.1] — 2026-11-05
 
 ### Fixed / Behoben
