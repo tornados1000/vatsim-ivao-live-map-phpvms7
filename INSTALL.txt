@@ -1,9 +1,44 @@
-LiveMap v5.2.1 - Install Package
+LiveMap v5.3.0 - Install Package
 ================================
 
 Contents:
   LiveMap/                     -> phpVMS module (copy to <phpvms-root>/modules/LiveMap/)
   live_map.blade.php           -> theme file (one line, copy into each theme in use)
+
+Changed in v5.3.0:
+
+  - Shared Cockpit on the map: when two pilots fly one flight together
+    with the SharedCockpit module, the map shows one aircraft. The host's
+    flight shows "Shared Cockpit - with <name> - Host PF/PM" in the board
+    and in the flight detail. Without the SharedCockpit module nothing
+    changes.
+
+  UPDATE from 5.2.x or 5.1.x: only the folder modules/LiveMap changes.
+
+Changed in v5.2.3:
+
+  - No empty band below the flight board: some themes (e.g. SPTheme) put
+    a large padding below the widget. LiveMap now reduces the gap to the
+    next visible box below to 16 px, measures again and takes it back if
+    the content below does not move up.
+  - Board on top or no board: the signature below the map now counts
+    towards the map height. Before, the widget was 27 px too tall and
+    extended past the window edge. Board below the map: unchanged.
+
+  UPDATE from 5.2.x or 5.1.x: only the folder modules/LiveMap changes.
+
+Changed in v5.2.2:
+
+  - Flight board below the map, from about 1000 px board width: columns
+    are spread evenly, pilot names and routes keep a minimum width, and
+    the font is larger. Narrower screens look exactly like 5.2.1.
+  - The map height follows the board: with few flights the map grows to
+    the window edge, with many it keeps at least 60 % of the height and
+    the list continues on the page. Admin min/max height still apply.
+  - ETA also for level flight below 5,000 ft above ground at up to
+    180 kt (shown as "Level" by ACARS clients, e.g. a C172).
+
+  UPDATE from 5.2.x or 5.1.x: only the folder modules/LiveMap changes.
 
 Fixed in v5.2.1:
 

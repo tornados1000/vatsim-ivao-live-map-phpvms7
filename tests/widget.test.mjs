@@ -415,6 +415,93 @@ test('Tafel unten: Raster ab 1000 px trifft nur unten, Zeilen ohne eigenen Rollb
   }
 });
 
+test('Kartenhoehe und Lueckenausgleich: Zahlen von GSG (Thomas 12.11.2026)', () => {
+  // GSG eingeloggt: Karte ab 158 px, Tafel mit 1 Flug 110 + Signatur 27.
+  const p = (fenster, tafel) => LM3.kartenHoehe({ fenster, oben: 158, untenFest: 0, tafel, min: 420, max: 1000 });
+  assert.equal(p(753, 137), 442);          // Chrome 1490x753: endet 16 px ueber dem Fensterrand
+  assert.equal(p(728, 137), 420);          // Thomas' Edge: Mindesthoehe greift
+  assert.equal(p(900, 137), 589);
+  assert.equal(p(900, 600), 436);          // viele Fluege: Karte behaelt 60 %
+  assert.equal(p(900, null), 726);         // Lage oben: keine Tafel unter der Karte
+  // Lage oben auf test 13.11.: Karte ab 157,5, Signatur 26,7 zaehlt voll → 527,8 + 26,7
+  // endet bei 712 = 728 - 16 (vorher 555, Widget ragte 11 px ueber den Fensterrand)
+  const oben = (fenster, tafel) => LM3.kartenHoehe({ fenster, oben: 157.5, untenFest: 0, tafel, signatur: 26.7, min: 420, max: 1000 });
+  assert.equal(oben(728, null), 528);
+  assert.equal(oben(950, null), 750);
+  assert.equal(oben(600, null), 420);      // kleines Fenster: Mindesthoehe greift weiter
+  assert.equal(oben(900, 600), 436);       // mit Tafel unten aendert die Signatur nichts (steckt in tafel)
+  assert.equal(LM3.kartenHoehe({ fenster: 3000, oben: 0, tafel: 100, min: 420, max: 1000 }), 1000);
+  assert.equal(LM3.kartenHoehe({ fenster: 900, oben: -300, untenFest: 50, tafel: null }), 834);   // gescrollt: oben zaehlt nicht negativ
+  // SPTheme: 93 px bis zur Fusszeile, Huelle (row) ohne eigenen Abstand → -77, Luecke danach 16
+  assert.equal(LM3.lueckenAusgleich(93, 0), -77);
+  assert.equal(LM3.lueckenAusgleich(93, 16), -61);
+  assert.equal(LM3.lueckenAusgleich(16, 0), 0);
+  assert.equal(LM3.lueckenAusgleich(4, 10), 10);   // engere Themes bleiben, wie sie sind
+});
+
+test('schliesseLuecke: echte Funktion gegen nachgebaute Seiten (SPTheme, Seven, halbes Nachruecken)', () => {
+  // Pruefbefund 5.2.3: der Ausgleich wurde gesetzt, ohne nachzumessen; Seven haelt die
+  // Fusszeile per min-vh-100 fest, dann entstand leerer Scrollraum.
+  const start = skript.indexOf("var huelle = null, huelleAlt = ''");
+  const ende = skript.indexOf('// Feste Leiste des Themes', start);
+  assert.ok(start > 0 && ende > start, 'schliesseLuecke nicht gefunden');
+  const seite = (modus, vorgabe = '', uebergang = '') => {
+    const el = (name, kinder = [], hoehe = 10) => { const e = { name, children: kinder, offsetHeight: hoehe, style: { marginBottom: vorgabe && name === 'row' ? vorgabe : '', transition: name === 'row' ? uebergang : '' } };
+      kinder.forEach((k, i) => { k.parentElement = e; k.nextElementSibling = kinder[i + 1] || null; }); return e; };
+    const wrap = el('wrap'), card = el('card', [wrap]), row = el('row', [card]);
+    const basis = parseFloat(row.style.marginBottom) || 0;
+    const fuss = el('fuss'), inner = el('inner', [row, fuss]), body = el('body', [inner]);
+    body.parentElement = null; body.nextElementSibling = null;
+    const marge = () => parseFloat(row.style.marginBottom) || 0;
+    const fussOben = () => 830 + (modus === 'folgt' ? marge() - basis : modus === 'halb' ? Math.max(marge() - basis, -23) : 0);
+    wrap.getBoundingClientRect = () => ({ top: 158, bottom: 737, left: 263, right: 1450, height: 579 });
+    fuss.getBoundingClientRect = () => ({ top: fussOben(), bottom: fussOben() + 65, left: 263, right: 1450, height: 65 });
+    [card, row, inner, body].forEach((e) => { e.getBoundingClientRect = () => ({ top: 0, bottom: 0, left: 0, right: 0, height: 0 }); });
+    const getComputedStyle = (e) => ({ position: e === fuss ? 'absolute' : 'static', display: 'block', marginBottom: e === row ? (row.style.marginBottom || '0px') : '0px' });
+    const ctx = { wrap, document: { body }, getComputedStyle, window: { LM3 } };
+    vm.runInNewContext(skript.slice(start, ende) + '; this.schliesseLuecke = schliesseLuecke;', ctx);
+    return { row, luecke: () => fussOben() - 737, lauf: ctx.schliesseLuecke };
+  };
+  const a = seite('folgt'); a.lauf();
+  assert.equal(a.row.style.marginBottom, '-77px'); assert.equal(a.luecke(), 16); assert.equal(a.row.style.transition, 'none');
+  a.lauf(); assert.equal(a.row.style.marginBottom, '-77px', 'zweiter Lauf aendert nichts');
+  const b = seite('haelt', '', 'margin .3s'); b.lauf();
+  assert.equal(b.row.style.marginBottom, '', 'Seven: kein Ausgleich, Fusszeile rueckt nicht');
+  assert.equal(b.row.style.transition, 'margin .3s', 'Uebergang zurueckgegeben');
+  const c = seite('halb'); c.lauf();
+  assert.equal(c.row.style.marginBottom, '-23px', 'nur das Nachgerueckte behalten'); assert.equal(c.luecke(), 70);
+  const d = seite('folgt', '30px'); d.lauf();
+  assert.equal(d.row.style.marginBottom, '-47px'); assert.equal(d.luecke(), 16);
+  assert.equal(LM3.wirksamerAusgleich(0, -77, 93, 93), 0);
+  assert.equal(LM3.wirksamerAusgleich(0, -77, 93, 16), -77);
+  assert.equal(LM3.wirksamerAusgleich(0, -77, 93, 70), -23);
+});
+
+test('messeHoehe: echte Funktion gibt die Signatur in Lage oben/aus an kartenHoehe weiter', () => {
+  // Pruefbefund 5.2.3: nur die reine Funktion war getestet; fiel die Uebergabe der
+  // Signatur in messeHoehe weg, ragte das Widget wieder ueber den Fensterrand.
+  const start = skript.indexOf('function messeHoehe() {');
+  const ende = skript.indexOf('// Unter dem Widget folgt im Theme oft', start);
+  assert.ok(start > 0 && ende > start, 'messeHoehe nicht gefunden');
+  const lauf = (tafelUnten) => {
+    const rechteck = (h, top = 0) => () => ({ top, bottom: top + h, height: h });
+    const sig = { offsetParent: {}, getBoundingClientRect: rechteck(26.7) };
+    const unten = { offsetParent: {}, getBoundingClientRect: rechteck(110) };
+    const flaeche = { style: { height: '' }, getBoundingClientRect: rechteck(0, 157.5) };
+    const wrap = { classList: { contains: (k) => tafelUnten && k === 'lm3--tafel-unten' }, contains: () => false,
+      querySelector: (s) => (s === '.lm3-signatur' ? sig : s === '.lm3-unten' ? unten : null) };
+    const ctx = { flaeche, wrap, cfg: { minHoehe: 420, maxHoehe: 1000 }, schliesseLuecke() {}, messeObenFrei() {},
+      getComputedStyle: () => ({ position: 'static', display: 'block', visibility: 'visible' }),
+      document: { body: { querySelectorAll: () => [] }, elementFromPoint: () => null },
+      window: { innerHeight: 728, innerWidth: 1470, pageYOffset: 0, LM3 } };
+    vm.runInNewContext(skript.slice(start, ende) + '; this.messeHoehe = messeHoehe;', ctx);
+    ctx.messeHoehe();
+    return flaeche.style.height;
+  };
+  assert.equal(lauf(false), '528px', 'Lage oben: Karte + Signatur enden 16 px ueber dem Fensterrand');
+  assert.equal(lauf(true), '420px', 'Tafel unten: wie 5.2.2 (Mindesthoehe bei 728)');
+});
+
 test('Sortierung nach ETA und Typ: fehlende Werte hinten', () => {
   const dep = { lat: 50, lon: 8 }, arr = { lat: 52, lon: 13 };
   const f = (id, gs, lat, typ) => ({ id, callsign: id, aircraft_icao: typ, phase: 'CRUISE', pos: { lat, lon: 10, gs_kt: gs } });
@@ -463,4 +550,76 @@ test('Tafelzeile: echte zeileAktiv liefert die Zellen in Kopf-Reihenfolge, ETA n
   assert.equal(zelle(zeile('CRUISE', { status: 'offline' }), 'lm3-sp-eta'), '');
   assert.equal(zelle(zeile('CRUISE', { last_seen: jetzt - 11 * 60000 }), 'lm3-sp-eta'), '');
   assert.equal(zelle(zeile('CRUISE', { aircraft_icao: '<b>' }), 'lm3-sp-typ'), '&lt;b&gt;');   // escaped
+});
+
+test('Shared Cockpit: Kennzeichen-Text wie sharedCockpitText der Webapp, DE und EN', () => {
+  const sc = { rolle_gastgeber: 'PF', partner_name: 'Peter M.' };
+  assert.equal(LM3.sharedCockpitText(sc, 'de'), 'Shared Cockpit · mit Peter M. · Gastgeber PF');
+  assert.equal(LM3.sharedCockpitText(sc, 'en'), 'Shared Cockpit · with Peter M. · Host PF');
+  assert.equal(LM3.sharedCockpitText({ rolle_gastgeber: 'PM', partner_name: null }, 'de'), 'Shared Cockpit · Gastgeber PM');
+  assert.equal(LM3.sharedCockpitText({ rolle_gastgeber: null, partner_name: '  Peter M. ' }, 'de'), 'Shared Cockpit · mit Peter M.');
+  assert.equal(LM3.sharedCockpitText({ rolle_gastgeber: null, partner_name: '   ' }, 'en'), 'Shared Cockpit');
+  assert.equal(LM3.sharedCockpitText({ rolle_gastgeber: 'XX', partner_name: 42 }, 'de'), 'Shared Cockpit');
+  assert.equal(LM3.sharedCockpitText(null, 'de'), '');
+  assert.equal(LM3.sharedCockpitText(undefined, 'en'), '');
+  assert.equal(LM3.sharedCockpitText('PF', 'de'), '');
+});
+
+test('Shared Cockpit: Tafelzeile zeigt das Kennzeichen beim Piloten, escaped, Spalten unveraendert', () => {
+  const start = skript.indexOf('function zeileAktiv(f) {');
+  const ende = skript.indexOf('function zeileGeplant(', start);
+  const knoten = () => ({ style: { setProperty() {} }, setAttribute() {}, addEventListener() {}, innerHTML: '' });
+  const ctx = {
+    LM3, LM_SPRACHE: 'de', LM_T: { pilot: 'Pilot' }, zustand: { auswahl: null }, waehle() {},
+    document: { createElement: knoten }, logoFuer: () => null, logoHtml: () => '', weg: () => null, Date,
+  };
+  const esc = skript.slice(skript.indexOf('function lmEsc(s) {'), skript.indexOf('function lmKurzname('));
+  vm.runInNewContext(esc + skript.slice(start, ende) + '; this.zeileAktiv = zeileAktiv;', ctx);
+  const basis = { id: 'x', callsign: 'GSG1', dep: 'EDDF', arr: 'LEBL', pilot_name: 'Max S.', phase: 'CRUISE', status: 'online', pos: {} };
+  const ohne = ctx.zeileAktiv(basis).innerHTML;
+  assert.match(ohne, /<span class="lm3-sp-pilot">Max S\.<\/span>/);   // ohne Crew wie bisher
+  const mit = ctx.zeileAktiv({ ...basis, shared_cockpit: { rolle_gastgeber: 'PF', partner_name: 'Pe<b>ter' } }).innerHTML;
+  const zelle = mit.slice(mit.indexOf('<span class="lm3-sp-pilot"'));
+  assert.ok(zelle.includes('Max S.'), zelle);
+  assert.ok(zelle.includes('Shared Cockpit · mit Pe&lt;b&gt;ter · Gastgeber PF'), zelle);
+  assert.ok(!mit.includes('<b>ter'), 'Partnername escaped');
+  assert.match(zelle, /title="Max S\. · Shared Cockpit · mit Pe&lt;b&gt;ter · Gastgeber PF"/);
+  const oben = (html) => { const out = []; let tiefe = 0; for (const m of html.matchAll(/<(\/?)span(?: class="([^"]*)")?[^>]*>/g)) { if (m[1]) tiefe--; else { if (tiefe === 0) out.push(m[2] || ''); tiefe++; } } return out; };
+  assert.deepEqual(oben(mit), oben(ohne), 'gleiche Zellen auf oberster Ebene');
+});
+
+test('Shared Cockpit: Flugdetail rendert die Crew-Zelle ganz, mit Umbruch statt Abschneiden', () => {
+  // Echte zelle() + zeichneDetail() aus dem Widget, mit langem Partnernamen gerendert.
+  const start = skript.indexOf('function zelle(name, wert, breit, extra) {');
+  const ende = skript.indexOf('// ── Folgen', start);
+  assert.ok(start > 0 && ende > start, 'zeichneDetail nicht gefunden');
+  const detail = { hidden: true, scrollTop: 0, innerHTML: '', style: { setProperty() {} }, querySelector: () => null, classList: { contains: () => false } };
+  const flug = { id: 'GSG/1', callsign: 'GSG100', dep: 'EDDF', arr: 'LEBL', pilot_name: 'Thomas K.', phase: 'CRUISE', status: 'online', pos: {},
+    shared_cockpit: { rolle_gastgeber: 'PM', partner_name: 'Christopher-Maximilian W.' } };
+  const ctx = {
+    LM3, LM_SPRACHE: 'de', LM_T: { pilot: 'Pilot', crew: 'Crew', flugzeug: 'Flugzeug', mehr: 'Mehr', folgen: 'Folgen', schliessen: 'Schliessen' },
+    el: { detail }, zustand: { auswahl: 'GSG/1', flughaefen: {}, folgen: false }, findeFlug: () => flug, weg: () => null,
+    logoFuer: () => null, safeAssetUrl: () => null, safeUrl: () => null,
+  };
+  const esc = skript.slice(skript.indexOf('function lmEsc(s) {'), skript.indexOf('function lmKurzname('));
+  vm.runInNewContext(esc + skript.slice(start, ende) + '; this.zeichneDetail = zeichneDetail;', ctx);
+  ctx.zeichneDetail();
+  const html = detail.innerHTML;
+  const text = 'Shared Cockpit · mit Christopher-Maximilian W. · Gastgeber PM';
+  const crew = html.match(/<div class="([^"]*)"><dt>Crew<\/dt><dd>([^<]*)<\/dd><\/div>/);
+  assert.ok(crew, html);
+  assert.equal(crew[2], text, 'voller Text samt Rolle in der Zelle');
+  assert.deepEqual(crew[1].split(' ').sort(), ['lm3-d-breit', 'lm3-d-umbruch']);
+  assert.ok(html.indexOf('<dt>Pilot</dt><dd>Thomas K.</dd>') < html.indexOf('<dt>Crew</dt>'), 'Crew unter dem Piloten');
+  // Die Klasse hebt das Abschneiden der Rasterzellen auf (spezifischer als .lm3-d-raster dd).
+  const css = fs.readFileSync(path.join(HIER, '..', 'LiveMap', 'Resources', 'views', 'partials', 'styles.blade.php'), 'utf8');
+  const regel = css.match(/\.lm3-d-raster \.lm3-d-umbruch dd \{([^}]*)\}/);
+  assert.ok(regel && /white-space:\s*normal/.test(regel[1]), 'Umbruch-Regel fehlt');
+  assert.ok(css.indexOf(regel[0]) > css.indexOf('.lm3-d-raster dd {'), 'Umbruch-Regel steht nach der Abschneide-Regel');
+  // Ohne Crew keine Zelle, andere breite Zellen ohne Zusatzklasse
+  ctx.findeFlug = () => ({ ...flug, shared_cockpit: undefined, pos: { qnh_hpa: 1013 } });
+  ctx.zeichneDetail();
+  assert.ok(!detail.innerHTML.includes('<dt>Crew</dt>') && !detail.innerHTML.includes('lm3-d-umbruch'));
+  const t = skript.slice(skript.indexOf('var LM_T = ({'), skript.indexOf('})[LM_SPRACHE];'));
+  assert.equal((t.match(/\bcrew: '/g) || []).length, 2, 'Bezeichnung DE und EN');
 });

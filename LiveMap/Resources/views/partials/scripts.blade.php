@@ -415,7 +415,47 @@
             return liste[0];
         }
 
+        // Shared Cockpit (Weg B): Kennzeichen am Gastgeber-Flug, Teile wie
+        // `sharedCockpitText` der Webapp (aeroacars-live webapp/src/lib/pilotAnzeige.ts):
+        // fehlt Name oder Rolle, faellt der Teil weg. Ohne Objekt: leer.
+        function sharedCockpitText(sc, sprache) {
+            if (!sc || typeof sc !== 'object') return '';
+            var en = sprache === 'en';
+            var teile = ['Shared Cockpit'];
+            var name = typeof sc.partner_name === 'string' ? sc.partner_name.trim() : '';
+            if (name) teile.push((en ? 'with ' : 'mit ') + name);
+            if (sc.rolle_gastgeber === 'PF' || sc.rolle_gastgeber === 'PM') teile.push((en ? 'Host ' : 'Gastgeber ') + sc.rolle_gastgeber);
+            return teile.join(' · ');
+        }
+        // Hoehe der Kartenflaeche: Fenster minus was ueber der Karte steht, was unten
+        // fest am Fenster klebt (Cookie-Leiste) und 16 px Luft. Tafel unten teilt sich
+        // den Platz: wenige Fluege, grosse Karte; viele Fluege, Karte mindestens 60 %
+        // und die Liste geht auf der Seite weiter. Danach Mindest-/Hoechsthoehe.
+        // Ohne Tafel unten (Lage oben/aus) zaehlt die Signatur unter der Karte voll mit,
+        // sonst ragte das Widget um ihre Hoehe ueber den Fensterrand (gemessen 13.11.2026);
+        // mit Tafel steckt sie schon in p.tafel.
+        function kartenHoehe(p) {
+            var h = p.fenster - Math.max(0, p.oben || 0) - (p.untenFest || 0) - 16;
+            if (p.tafel != null) h = Math.max(h - p.tafel, h * 0.6);
+            else h -= p.signatur || 0;
+            return Math.round(Math.max(p.min || 420, Math.min(p.max || 1000, h)));
+        }
+        // Polster des Themes unter dem Widget auf 16 px schliessen (SPTheme liess
+        // 93 px leer bis zur Fusszeile, Thomas 12.11.2026): neuer Aussenabstand
+        // unten fuer die Huelle des Widgets.
+        function lueckenAusgleich(luecke, abstand) {
+            return luecke > 16 ? abstand - (luecke - 16) : abstand;
+        }
+        // Nach dem Setzen nachgemessen: nur so viel Ausgleich behalten, wie der Kasten
+        // darunter wirklich nachgerueckt ist (rueckt er nicht, bleibt der alte Abstand).
+        function wirksamerAusgleich(abstand, soll, lueckeVorher, lueckeNachher) {
+            var gerueckt = lueckeVorher - lueckeNachher;
+            if (gerueckt < 1) return abstand;
+            return Math.max(soll, abstand - gerueckt);
+        }
+
         wurzel.LM3 = {
+            kartenHoehe: kartenHoehe, lueckenAusgleich: lueckenAusgleich, wirksamerAusgleich: wirksamerAusgleich,
             PHASE_COLOR: PHASE_COLOR, PHASE_LIST: PHASE_LIST, PHASE_LABEL: PHASE_LABEL,
             phaseColor: phaseColor, phaseLabel: phaseLabel, phaseForDisplay: phaseForDisplay,
             formatSimLabel: formatSimLabel, fmtQnhBoth: fmtQnhBoth, ageString: ageString, zahl: zahl,
@@ -426,7 +466,7 @@
             etaMinuten: etaMinuten, etaText: etaText, etaFuerFlug: etaFuerFlug,
             KLASSEN: KLASSEN, flugzeugKlasse: flugzeugKlasse, klassenInfo: klassenInfo, amBoden: amBoden,
             aufSprechfrequenz: aufSprechfrequenz, vatspyLesen: vatspyLesen, firTreffer: firTreffer,
-            grenzenFuerLotse: grenzenFuerLotse, firFlaeche: firFlaeche
+            grenzenFuerLotse: grenzenFuerLotse, firFlaeche: firFlaeche, sharedCockpitText: sharedCockpitText
         };
     })(typeof window !== 'undefined' ? window : globalThis);
     /* </lm3-rein> */
@@ -1570,7 +1610,7 @@
                     keineGeplant: 'Keine geplanten Flüge.', laden: 'Flüge werden geladen …',
                     folgen: 'Folgen', folgt: 'Folgt', frei: 'Frei', alle: 'Alle Phasen', zuletzt: 'vor',
                     schliessen: 'Schließen', stand: 'Stand', offline: 'offline', abflug: 'Abflug',
-                    pilot: 'Pilot', veraltet: 'Angezeigt wird der letzte bekannte Stand.', nochmal: 'Erneut versuchen',
+                    pilot: 'Pilot', crew: 'Crew', veraltet: 'Angezeigt wird der letzte bekannte Stand.', nochmal: 'Erneut versuchen',
                     flugzeug: 'Flugzeug', hoehe: 'Höhe', kurs: 'Kurs', fortschritt: 'Fortschritt', mehr: 'Mehr Werte',
                     weitereFluege: 'weitere Flüge hier – Klick zoomt hinein',
                     fehler: {
@@ -1588,7 +1628,7 @@
                     keineGeplant: 'No planned flights.', laden: 'Loading flights …',
                     folgen: 'Follow', folgt: 'Following', frei: 'Free', alle: 'All phases', zuletzt: 'ago',
                     schliessen: 'Close', stand: 'Stand', offline: 'offline', abflug: 'Departure',
-                    pilot: 'Pilot', veraltet: 'Showing the last known state.', nochmal: 'Try again',
+                    pilot: 'Pilot', crew: 'Crew', veraltet: 'Showing the last known state.', nochmal: 'Try again',
                     flugzeug: 'Aircraft', hoehe: 'Altitude', kurs: 'Heading', fortschritt: 'Progress', mehr: 'More values',
                     weitereFluege: 'more flights here – click to zoom in',
                     fehler: {
@@ -1861,6 +1901,7 @@
                     var pos = f.pos || {};
                     var phase = LM3.phaseForDisplay(f.phase, f.shadow_segment);
                     var w = weg(f);
+                    var sc = LM3.sharedCockpitText(f.shared_cockpit, LM_SPRACHE);
                     var b = document.createElement('button');
                     b.type = 'button';
                     b.className = 'lm3-zeile lm3-g-akt' + (zustand.auswahl === f.id ? ' ist-gewaehlt' : '') + (f.status === 'offline' ? ' ist-offline' : '');
@@ -1877,7 +1918,10 @@
                             '<i class="lm3-fort" aria-hidden="true"><i style="width:' + Math.round(w.anteil * 100) + '%"></i></i>' : '') + '</span>' +
                         '<span class="lm3-sp-eta">' + lmEsc(LM3.etaFuerFlug(f, w, Date.now())) + '</span>' +
                         '<span class="lm3-sp-phase"><span class="lm3-pille">' + lmEsc(LM3.phaseLabel(phase)) + '</span></span>' +
-                        '<span class="lm3-sp-pilot">' + lmEsc(f.pilot_name || '') + '</span>';
+                        // Shared Cockpit: Kennzeichen hinter dem Namen; die Zelle schneidet ab, der volle Text steht im title.
+                        (sc ? '<span class="lm3-sp-pilot" title="' + lmEsc([f.pilot_name, sc].filter(Boolean).join(' · ')) + '">' +
+                            lmEsc(f.pilot_name || '') + ' <span class="lm3-sc">· ' + lmEsc(sc) + '</span></span>'
+                            : '<span class="lm3-sp-pilot">' + lmEsc(f.pilot_name || '') + '</span>');
                     b.addEventListener('click', function () { waehle(f.id, true); });
                     return b;
                 }
@@ -2028,9 +2072,11 @@
 
                 // ── Detailkasten (Aufbau wie der 4.7.9-„Crew Pass“) ──
                 // Felder, die die Quelle nicht liefert, fehlen — keine Striche.
+                // breit: true = ganze Zeile; ein Text = ganze Zeile mit dieser Zusatzklasse.
                 function zelle(name, wert, breit, extra) {
                     if (wert == null || wert === '') return '';
-                    return '<div' + (breit ? ' class="lm3-d-breit"' : '') + '><dt>' + lmEsc(name) + '</dt><dd>' + lmEsc(wert) + '</dd>' + (extra || '') + '</div>';
+                    var klasse = breit ? 'lm3-d-breit' + (typeof breit === 'string' ? ' ' + breit : '') : '';
+                    return '<div' + (klasse ? ' class="' + klasse + '"' : '') + '><dt>' + lmEsc(name) + '</dt><dd>' + lmEsc(wert) + '</dd>' + (extra || '') + '</div>';
                 }
                 function zeichneDetail() {
                     if (!el.detail) return;
@@ -2046,6 +2092,7 @@
 
                     var raster =
                         zelle(LM_T.pilot, f.pilot_name) +
+                        zelle(LM_T.crew, LM3.sharedCockpitText(f.shared_cockpit, LM_SPRACHE), 'lm3-d-umbruch') +
                         zelle(LM_T.flugzeug, flugzeug) +
                         zelle(LM_T.hoehe, pos.alt_ft != null ? LM3.zahl(pos.alt_ft, LM_SPRACHE) + ' ft' : null) +
                         zelle('GS', pos.gs_kt != null ? Math.round(pos.gs_kt) + ' kt' : null) +
@@ -2449,24 +2496,70 @@
                         if (r.height < window.innerHeight / 2) untenFest = Math.max(untenFest, r.height);
                         break;
                     }
-                    var h = window.innerHeight - Math.max(0, oben) - untenFest - 16;
-                    // Tafel unten: Karte und Tafel teilen sich das Fenster — wenige Fluege,
-                    // grosse Karte, die ganze Tafel steht im Fenster. Bei vielen Fluegen
-                    // behaelt die Karte mindestens 60 % und die Liste geht darunter weiter
-                    // (kein Rollbalken in der Tafel: der verschob unter Windows die Zeilen
-                    // gegen den Kopf, Abnahme 5.2.2).
+                    // Tafel unten: kein Rollbalken in der Tafel (der verschob unter Windows
+                    // die Zeilen gegen den Kopf, Abnahme 5.2.2), sie zaehlt mit Signatur.
                     var unten = wrap.classList.contains('lm3--tafel-unten') && wrap.querySelector('.lm3-unten');
-                    if (unten && unten.offsetParent !== null) {
-                        var sig = wrap.querySelector('.lm3-signatur');
-                        var tafelH = unten.getBoundingClientRect().height + (sig ? sig.getBoundingClientRect().height : 0);
-                        h = Math.max(h - tafelH, h * 0.6);
-                    }
-                    h = Math.max(cfg.minHoehe || 420, Math.min(cfg.maxHoehe || 1000, h));
-                    var neu = Math.round(h) + 'px';
+                    var tafelH = null;
+                    var sig = wrap.querySelector('.lm3-signatur');
+                    var sigH = sig && sig.offsetParent !== null ? sig.getBoundingClientRect().height : 0;
+                    if (unten && unten.offsetParent !== null) tafelH = unten.getBoundingClientRect().height + sigH;
+                    var neu = window.LM3.kartenHoehe({ fenster: window.innerHeight, oben: oben, untenFest: untenFest,
+                        tafel: tafelH, signatur: sigH, min: cfg.minHoehe, max: cfg.maxHoehe }) + 'px';
                     var geaendert = flaeche.style.height !== neu;
                     flaeche.style.height = neu;
+                    schliesseLuecke();
                     messeObenFrei();
                     return geaendert;
+                }
+                // Unter dem Widget folgt im Theme oft ein Polster bis zur Fusszeile (SPTheme:
+                // 93 px). Die Karte reicht bis an den Fensterrand, beim Scrollen kam darunter
+                // ein leeres Band (Thomas 12.11.2026). Gemessen wird der naechste sichtbare
+                // Kasten unter dem Widget; den Ausgleich bekommt die aeusserste Huelle, die nur
+                // das Widget enthaelt — am Widget selbst endete der Kartenrahmen mitten in der
+                // Tafel. Vorher immer zuruecksetzen, damit die Luecke frisch gemessen wird.
+                // Waehrend der Ausgleich steht, ist der Uebergang der Huelle aus: sonst misst
+                // das Zuruecksetzen mitten in der Animation und jedes transitionend rechnet neu.
+                var huelle = null, huelleAlt = '', huelleUebergang = '';
+                function zaehltAlsInhalt(e) {
+                    var st = getComputedStyle(e);
+                    return e.offsetHeight > 0 && st.position !== 'fixed' && st.position !== 'absolute';
+                }
+                function gibHuelleFrei() {
+                    if (!huelle) return;
+                    huelle.style.marginBottom = huelleAlt;
+                    huelle.getBoundingClientRect();   // erst den Abstand setzen, dann den Uebergang zurueck — sonst animiert er
+                    huelle.style.transition = huelleUebergang;
+                    huelle = null;
+                }
+                function schliesseLuecke() {
+                    gibHuelleFrei();
+                    var k = wrap.getBoundingClientRect(), naechst = null, naechstEl = null, grenze = null;
+                    for (var a = wrap; a && a !== document.body && !naechst; a = a.parentElement) {
+                        for (var s = a.nextElementSibling; s; s = s.nextElementSibling) {
+                            var st = getComputedStyle(s);
+                            if (st.position === 'fixed' || st.display === 'none') continue;
+                            var r = s.getBoundingClientRect();
+                            if (!r.height || r.right <= k.left || r.left >= k.right || r.top < k.bottom - 1) continue;
+                            if (!naechst || r.top < naechst.top) { naechst = r; naechstEl = s; grenze = a.parentElement; }
+                        }
+                    }
+                    if (!naechst) return;
+                    var h = wrap;
+                    while (h.parentElement && h.parentElement !== grenze && [].filter.call(h.parentElement.children, zaehltAlsInhalt).length === 1) h = h.parentElement;
+                    var jetzt = parseFloat(getComputedStyle(h).marginBottom) || 0;
+                    var luecke = Math.round(naechst.top - k.bottom);
+                    var soll = window.LM3.lueckenAusgleich(luecke, jetzt);
+                    if (soll === jetzt) return;
+                    huelle = h; huelleAlt = h.style.marginBottom; huelleUebergang = h.style.transition;
+                    h.style.transition = 'none';
+                    h.style.marginBottom = soll + 'px';
+                    // Nachmessen: Haelt das Theme den Kasten fest (Seven: Fusszeile per
+                    // min-vh-100 unten, ebenso eine laengere Nachbarspalte), braechte der
+                    // Ausgleich nur leeren Scrollraum. Behalten wird nur, was nachgerueckt ist.
+                    var nachher = Math.round(naechstEl.getBoundingClientRect().top - wrap.getBoundingClientRect().bottom);
+                    var wirksam = window.LM3.wirksamerAusgleich(jetzt, soll, luecke, nachher);
+                    if (wirksam === jetzt) gibHuelleFrei();
+                    else if (wirksam !== soll) h.style.marginBottom = wirksam + 'px';
                 }
                 // Feste Leiste des Themes ueber der Kartenoberkante (Cookie-Hinweis oben bei
                 // Seven/Disposable, beim Scrollen die Navigationsleiste): Tafel, Zoom und
@@ -2732,7 +2825,7 @@
                 function obenSpaeter() { clearTimeout(obenTimer); obenTimer = setTimeout(function () { if (messeHoehe()) map.invalidateSize(); }, 120); }
                 window.addEventListener('scroll', obenSpaeter, { passive: true });
                 document.addEventListener('click', function () { setTimeout(obenSpaeter, 400); }, true);
-                document.addEventListener('transitionend', obenSpaeter, true);
+                document.addEventListener('transitionend', function (ev) { if (!/^margin/.test(ev.propertyName || '')) obenSpaeter(); }, true);
                 // Manche Themes haengen die Cookie-Leiste erst nach dem Laden in <body>
                 // (SPTheme) — dann neu messen, sonst laege sie ueber dem Tafelkopf unten.
                 if (window.MutationObserver && document.body) {

@@ -4,6 +4,46 @@ All notable changes to this project are documented in this file.
 
 ---
 
+## [5.3.0] — 2026-11-13
+
+### Added / Neu
+- **Shared Cockpit auf der Karte:** Fliegen zwei Piloten einen Flug gemeinsam (Modul
+  SharedCockpit), zeigt die Karte ein Flugzeug statt zwei. Am Flug des Gastgebers steht in der
+  Flugtafel hinter dem Namen und im Flugdetail unter „Crew“: „Shared Cockpit · mit <Name> ·
+  Gastgeber PF“ (bzw. PM). Gilt für die Quellen phpVMS, live und beide. Ohne das Modul
+  SharedCockpit oder ohne laufende Crew sieht die Karte aus wie in 5.2.3. *Shared Cockpit on
+  the map: when two pilots fly one flight together (SharedCockpit module), the map shows one
+  aircraft. The host's flight carries “Shared Cockpit · with <name> · Host PF/PM” in the
+  board and in the flight detail. Without the SharedCockpit module nothing changes.*
+
+### Upgrade
+Nur `modules/LiveMap` tauschen. *Only replace `modules/LiveMap`.*
+
+---
+
+## [5.2.3] — 2026-11-13
+
+### Changed / Geändert
+- **Kein leeres Band mehr unter der Flugtafel:** Manche Themes (z. B. SPTheme) setzen unter
+  das Widget ein großes Polster (bei GSG 93 px bis zur Fußzeile). LiveMap misst jetzt den
+  nächsten sichtbaren Kasten unter dem Widget und gleicht den Abstand auf 16 px an. Danach
+  wird nachgemessen: Rückt der Inhalt darunter nicht nach (Fußzeile vom Theme festgehalten,
+  längere Nachbarspalte), wird der Ausgleich zurückgenommen, damit kein leerer Scrollraum
+  entsteht. *No empty band below the flight board: theme padding below the widget is reduced
+  to 16 px, measured and reverted when the content below does not move up.*
+- **Lage oben / ohne Tafel:** Die Signatur unter der Karte zählt jetzt bei der Kartenhöhe mit.
+  Vorher war das Widget um ihre Höhe (27 px) zu lang und ragte über den Fensterrand. Mit
+  Tafel unten bleibt die Rechnung wie in 5.2.2. *Top / no board: the signature below the map
+  now counts towards the map height; the widget was 27 px too tall and extended past the
+  window edge. Bottom board unchanged.*
+- Die Kartenhöhe wird in einer eigenen, getesteten Funktion berechnet. *Map height calculation
+  moved into a tested function.*
+
+### Upgrade
+Nur `modules/LiveMap` tauschen. *Only replace `modules/LiveMap`.*
+
+---
+
 ## [5.2.2] — 2026-11-12
 
 ### Changed / Geändert
